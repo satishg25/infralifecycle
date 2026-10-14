@@ -1,0 +1,6 @@
+---
+# Deliberately destroys nothing: the platform did not create this host, so it must not delete it.
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _existing_state: absent

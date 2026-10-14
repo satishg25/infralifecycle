@@ -1,0 +1,31 @@
+---
+# Facts come from gather_facts (play level). We read ansible_facts[...] rather than the
+# injected top-level variables: it is the supported, collision-free way.
+- name: Assert supported operating system and enforcing SELinux
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] in rhel_baseline_allowed_distributions
+      - ansible_facts['distribution_major_version'] in rhel_baseline_supported_majors
+      - ansible_facts['selinux']['status'] == 'enabled'
+      - ansible_facts['selinux']['mode'] == 'enforcing'
+    fail_msg: >-
+      Unsupported host: distribution={{ ansible_facts['distribution'] }}
+      major={{ ansible_facts['distribution_major_version'] }}
+      selinux={{ ansible_facts['selinux']['status'] | default('unknown') }}/{{ ansible_facts['selinux']['mode'] | default('unknown') }}
+      (need {{ rhel_baseline_allowed_distributions }} {{ rhel_baseline_supported_majors }}, SELinux enforcing)
+    quiet: true
+
+- name: Assert NTP servers were supplied by the profile
+  ansible.builtin.assert:
+    that: rhel_baseline_ntp_servers | length > 0
+    fail_msg: "rhel_baseline_ntp_servers is empty - set profile.baseline.ntp_servers"
+    quiet: true
+
+- name: Assert data volumes use stable device paths
+  ansible.builtin.assert:
+    that: item.device is match('^/dev/disk/by-')
+    fail_msg: "Volume '{{ item.role }}' uses '{{ item.device }}' - only /dev/disk/by-* paths are allowed"
+    quiet: true
+  loop: "{{ rhel_baseline_data_volumes }}"
+  loop_control:
+    label: "{{ item.role }}"

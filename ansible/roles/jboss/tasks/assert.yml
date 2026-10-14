@@ -1,0 +1,23 @@
+---
+- name: Assert a supported platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'RedHat'
+      - ansible_facts['distribution_major_version'] in ['8', '9']
+    fail_msg: >-
+      JBoss EAP 8 RPM install needs RHEL 8 or 9; found
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_major_version'] }}
+    quiet: true
+
+- name: Assert the bind address, if set, is a plain IPv4 address
+  ansible.builtin.assert:
+    that: jboss_bind_address == '' or jboss_bind_address is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+    fail_msg: "jboss_bind_address must be empty or an IPv4 address, got '{{ jboss_bind_address }}'"
+    quiet: true
+
+- name: Assert firewall ports look like port/proto
+  ansible.builtin.assert:
+    that: item is match('^[0-9]{1,5}/(tcp|udp)$')
+    fail_msg: "Bad firewall port '{{ item }}' - expected e.g. 8080/tcp"
+    quiet: true
+  loop: "{{ jboss_firewall_ports }}"

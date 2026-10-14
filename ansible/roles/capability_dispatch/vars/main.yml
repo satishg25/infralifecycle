@@ -1,0 +1,14 @@
+---
+# Result contracts enforced on EVERY driver, so a new driver cannot leak provider shapes
+# into OS/workload roles. Mirrors contracts/*.schema.json by hand (TODO: CI drift check).
+capability_dispatch_valid_actions: [apply, validate, revert]
+
+capability_dispatch_result_specs:
+  compute:
+    contract: {type: str, required: true, choices: [machine_result.v1]}
+    state: {type: str, required: true, choices: [present, absent]}
+    id: {type: str, required: true}
+    fqdn: {type: str, required: true}
+    ip: {type: str, required: true}
+    disk_map: {type: dict, required: true}
+    state_ref: {type: str, required: true}

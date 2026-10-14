@@ -1,0 +1,22 @@
+---
+# Flow: assert -> install (source-specific) -> start -> configure via management CLI -> firewall.
+# Run the read-only checks separately with:  tasks_from: validate
+- name: Assert platform preconditions
+  ansible.builtin.import_tasks: assert.yml
+  tags: [jboss, jboss_assert]
+
+- name: Install JBoss EAP from the selected source
+  ansible.builtin.include_tasks: "install_{{ jboss_install_source }}.yml"
+  tags: [jboss, jboss_install]
+
+- name: Start the service
+  ansible.builtin.import_tasks: service.yml
+  tags: [jboss, jboss_service]
+
+- name: Configure through the management CLI
+  ansible.builtin.import_tasks: configure.yml
+  tags: [jboss, jboss_configure]
+
+- name: Open firewall ports requested by the profile
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [jboss, jboss_firewall]

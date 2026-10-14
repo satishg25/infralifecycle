@@ -1,0 +1,7 @@
+---
+# state=present (not latest): idempotent and predictable. Patching is a separate, scheduled
+# concern - never a side effect of provisioning.
+- name: Install baseline packages
+  ansible.builtin.dnf:
+    name: "{{ rhel_baseline_packages }}"
+    state: present

@@ -1,0 +1,16 @@
+---
+- name: Look up mock machine
+  ansible.builtin.stat:
+    path: "{{ cap_compute_mock_state_dir }}/{{ cap_spec.name }}.json"
+  register: cap_compute_mock_stat
+
+- name: Fail if the machine does not exist
+  ansible.builtin.assert:
+    that: cap_compute_mock_stat.stat.exists
+    fail_msg: "Mock machine '{{ cap_spec.name }}' not found"
+    quiet: true
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _mock_state: present

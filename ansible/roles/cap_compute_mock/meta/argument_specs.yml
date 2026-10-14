@@ -1,0 +1,33 @@
+---
+# Entry-point argument specs = the driver's INPUT contract. Ansible validates these
+# automatically when the role is invoked with tasks_from: <entry point>.
+argument_specs:
+  apply:
+    short_description: Create (idempotently) a mock machine and return machine_result.v1
+    options: &opts
+      cap_spec:
+        type: dict
+        required: true
+        options:
+          contract: {type: str, required: true, choices: [machine_spec.v1]}
+          name: {type: str, required: true}
+          cpu: {type: int, required: true}
+          memory_gb: {type: int, required: true}
+          image_ref: {type: str, required: true}
+          placement_ref: {type: str, required: true}
+          network_ref: {type: str, required: true}
+          disks: {type: list, elements: dict, required: true}
+          tags: {type: dict, required: true}
+          native: {type: dict, required: false}
+      cap_cfg:
+        type: dict
+        required: true
+        options:
+          domain: {type: str, required: true}
+          ip_prefix: {type: str, required: true}
+  validate:
+    short_description: Confirm the mock machine exists and return machine_result.v1
+    options: *opts
+  revert:
+    short_description: Remove the mock machine and return machine_result.v1 with state absent
+    options: *opts

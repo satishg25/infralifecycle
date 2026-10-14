@@ -1,0 +1,50 @@
+---
+# Capability dispatcher: the one place that maps  capability -> driver  via the profile.
+# Inputs : capability_dispatch_{name,action,input}
+# Output : capability_dispatch_results[<name>]   (driver sets cap_result: the public driver contract)
+- name: Assert dispatcher inputs
+  ansible.builtin.assert:
+    that:
+      - capability_dispatch_name is defined
+      - capability_dispatch_action in capability_dispatch_valid_actions
+      - capability_dispatch_input is mapping
+      - capability_dispatch_name in capability_dispatch_result_specs
+    fail_msg: >-
+      Bad dispatch: name={{ capability_dispatch_name | default('?') }}
+      action={{ capability_dispatch_action | default('?') }}
+      (valid actions: {{ capability_dispatch_valid_actions }})
+    quiet: true
+
+- name: Assert the capability is bound in the profile (no silent defaults)
+  ansible.builtin.assert:
+    that: capability_dispatch_name in profile.capabilities
+    fail_msg: "Profile '{{ profile.name }}' has no binding for capability '{{ capability_dispatch_name }}'"
+    quiet: true
+
+- name: Resolve driver binding
+  ansible.builtin.set_fact:
+    capability_dispatch_driver: "{{ profile.capabilities[capability_dispatch_name].driver }}"
+    capability_dispatch_config: "{{ profile.capabilities[capability_dispatch_name].config | default({}) }}"
+
+- name: Refuse mock drivers unless the profile explicitly allows them
+  ansible.builtin.assert:
+    that: capability_dispatch_driver != 'mock' or (profile.policy.allow_mock | default(false) | bool)
+    fail_msg: "Mock driver for '{{ capability_dispatch_name }}' is not permitted by profile '{{ profile.name }}' (policy.allow_mock=false)"
+    quiet: true
+
+- name: Run the profile-bound driver entry point
+  ansible.builtin.include_role:
+    name: "cap_{{ capability_dispatch_name }}_{{ capability_dispatch_driver }}"
+    tasks_from: "{{ capability_dispatch_action }}"
+  vars:
+    cap_spec: "{{ capability_dispatch_input }}"
+    cap_cfg: "{{ capability_dispatch_config }}"
+
+- name: Enforce the result contract on the driver output
+  ansible.builtin.validate_argument_spec:
+    argument_spec: "{{ capability_dispatch_result_specs[capability_dispatch_name] }}"
+    provided_arguments: "{{ cap_result }}"
+
+- name: Record result
+  ansible.builtin.set_fact:
+    capability_dispatch_results: "{{ capability_dispatch_results | default({}) | combine({capability_dispatch_name: cap_result}) }}"

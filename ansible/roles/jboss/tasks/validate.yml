@@ -1,0 +1,56 @@
+---
+# Read-only. Use:  include_role: {name: jboss, tasks_from: validate}
+- name: Check the service is running
+  ansible.builtin.service_facts:
+
+- name: Assert the service is running
+  ansible.builtin.assert:
+    that: (ansible_facts['services'][jboss_service_name ~ '.service']['state'] | default('absent')) == 'running'
+    fail_msg: "{{ jboss_service_name }} is not running"
+    quiet: true
+
+- name: Query health endpoint
+  ansible.builtin.uri:
+    url: "{{ jboss_health_url }}"
+    return_content: true
+    status_code: 200
+  register: jboss_health
+  until: jboss_health.status == 200
+  retries: 12
+  delay: 5
+
+- name: Assert the server reports UP
+  ansible.builtin.assert:
+    that: (jboss_health.json.status | default('')) == 'UP'
+    fail_msg: "Health endpoint did not report UP: {{ jboss_health.content | default('') }}"
+    quiet: true
+
+# The management port must listen on loopback only (design requirement: no exposure beyond
+# approved networks). 'ss' output lists local addresses; any wildcard listener fails the check.
+- name: List listeners on the management port
+  ansible.builtin.command: "ss -H -ltn 'sport = :{{ jboss_management_port }}'"
+  register: jboss_mgmt_listeners
+  changed_when: false
+
+# 'ss -H' columns: State Recv-Q Send-Q Local:Port Peer:Port  -> column index 3 is the LOCAL address.
+# (The peer column is always 0.0.0.0:* so it must not be inspected.)
+- name: Assert management is loopback-only
+  ansible.builtin.assert:
+    that:
+      - jboss_mgmt_listeners.stdout_lines | length > 0
+      - >-
+        jboss_mgmt_listeners.stdout_lines | map('split') | map(attribute='3')
+        | reject('match', '^(127\.0\.0\.1|\[::1\]):') | list | length == 0
+    fail_msg: "Management port {{ jboss_management_port }} is exposed beyond loopback: {{ jboss_mgmt_listeners.stdout }}"
+    quiet: true
+
+- name: Read the service unit properties (no state change - name only)
+  ansible.builtin.systemd_service:
+    name: "{{ jboss_service_name }}.service"
+  register: jboss_unit
+
+- name: Assert the service does not run as root
+  ansible.builtin.assert:
+    that: (jboss_unit.status.User | default('')) not in ['', 'root']
+    fail_msg: "{{ jboss_service_name }} runs as '{{ jboss_unit.status.User | default('') }}' - expected a dedicated account"
+    quiet: true

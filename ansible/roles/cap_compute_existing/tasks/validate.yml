@@ -1,0 +1,12 @@
+---
+- name: Confirm the host answers on SSH
+  ansible.builtin.wait_for:
+    host: "{{ cap_cfg.ip }}"
+    port: 22
+    timeout: 10
+    state: started
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _existing_state: present

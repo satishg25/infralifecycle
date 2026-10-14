@@ -1,0 +1,52 @@
+---
+# Resolve a logical request into a provider-neutral machine spec, then drive the
+# profile-bound compute driver through the capability dispatcher.
+#
+#   cd ansible
+#   ansible-playbook playbooks/provision.yml \
+#     -e profile_dir=../profiles/example-lab \
+#     -e request_file=../profiles/example-lab/sample-request.json \
+#     -e platform_action=apply          # apply | validate | revert
+#
+# "Plan" is Ansible's own check mode:  add  --check --diff
+- name: Resolve request and manage compute
+  hosts: localhost
+  gather_facts: false
+  tags: [provision]
+  vars:
+    platform_action: apply
+  tasks:
+    - name: Require profile_dir and request_file
+      ansible.builtin.assert:
+        that:
+          - profile_dir is defined
+          - request_file is defined
+        fail_msg: "Pass -e profile_dir=<dir> -e request_file=<file.json>"
+        quiet: true
+
+    # Ansible resolves relative file args against the playbook dir; realpath pins them to
+    # the directory you ran from, so -e profile_dir=../profiles/x behaves as expected.
+    - name: Load customer profile and catalogue (the only customer-specific inputs)
+      ansible.builtin.include_vars:
+        file: "{{ profile_dir | realpath }}/{{ item }}"
+      loop: [profile.yml, catalogue.yml]
+
+    - name: Load request (already schema-validated by the intake step)
+      ansible.builtin.set_fact:
+        request: "{{ lookup('ansible.builtin.file', request_file | realpath) | from_json }}"
+
+    - name: Resolve logical request into machine spec
+      ansible.builtin.include_role:
+        name: machine_resolve
+
+    - name: Drive compute capability
+      ansible.builtin.include_role:
+        name: capability_dispatch
+      vars:
+        capability_dispatch_name: compute
+        capability_dispatch_action: "{{ platform_action }}"
+        capability_dispatch_input: "{{ machine_spec }}"
+
+    - name: Show contract result (no secrets ever belong in a result)
+      ansible.builtin.debug:
+        var: capability_dispatch_results.compute

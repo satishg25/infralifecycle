@@ -1,0 +1,14 @@
+---
+- name: Enable and start the standalone service
+  ansible.builtin.service:
+    name: "{{ jboss_service_name }}"
+    state: started
+    enabled: true
+
+# The management interface is the readiness signal for the CLI steps that follow.
+- name: Wait for the management interface
+  ansible.builtin.wait_for:
+    host: "{{ jboss_management_host }}"
+    port: "{{ jboss_management_port }}"
+    timeout: "{{ jboss_start_timeout }}"
+    state: started

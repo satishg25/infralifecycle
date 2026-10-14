@@ -1,0 +1,42 @@
+---
+# Defaults hold SAFE, overridable values. Anything environment-specific and security-relevant
+# has NO usable default (rhel_baseline_ntp_servers): the role fails closed until it is supplied
+# by the customer profile.
+
+rhel_baseline_allowed_distributions: [RedHat]   # add Rocky/AlmaLinux only for lab use
+rhel_baseline_supported_majors: ["8"]
+
+rhel_baseline_packages:
+  - audit
+  - bind-utils
+  - chrony
+  - firewalld
+  - lsof
+  - lvm2
+  - policycoreutils-python-utils
+  - rsync
+  - tar
+  - unzip
+  - xfsprogs
+
+rhel_baseline_timezone: UTC
+rhel_baseline_ntp_servers: []          # REQUIRED - no default on purpose
+
+rhel_baseline_firewall_services: [ssh]
+rhel_baseline_firewall_ports: []       # e.g. ["8443/tcp"] - opened by workload roles or profile
+
+# Starter hardening only. Replace with the customer's standard (CIS / STIG / internal).
+rhel_baseline_sysctl:
+  kernel.randomize_va_space: 2
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+
+rhel_baseline_sshd_settings:
+  PermitRootLogin: "no"
+  PasswordAuthentication: "no"
+  X11Forwarding: "no"
+
+# list of {role, device, vg, lv, mount, fs}; device MUST be a stable /dev/disk/by-* path.
+rhel_baseline_data_volumes: []
+rhel_baseline_mount_options: "defaults,nodev,nosuid"

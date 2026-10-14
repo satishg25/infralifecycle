@@ -1,0 +1,8 @@
+.state/
+*.retry
+__pycache__/
+.venv/
+.ansible/
+*.vault
+secrets*
+.env

@@ -1,0 +1,19 @@
+---
+# Logical name -> physical reference. Requests use the left-hand names only.
+catalogue:
+  sizing:
+    small:  {cpu: 2, memory_gb: 8}
+    medium: {cpu: 4, memory_gb: 16}
+    large:  {cpu: 8, memory_gb: 32}
+  images:
+    rhel8-std: "mock-image/rhel8"      # azure: URN / vmware: template path
+  placement:
+    lab-a: "mock-zone-a"               # azure: region+zone / vmware: cluster+datastore
+  networks:
+    app-lab: "mock-net-app"            # azure: subnet id / vmware: portgroup
+  defaults:
+    placement: lab-a
+    os_disk_gb: 50
+    data_disk_gb: 100
+    data_mount: /opt/app
+    data_fs: xfs

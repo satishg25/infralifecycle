@@ -1,0 +1,33 @@
+---
+# Proves template logic without needing a RHEL host:  ansible-playbook tests/render_templates.yml
+- name: Render rhel_baseline templates and assert content
+  hosts: localhost
+  gather_facts: false
+  vars:
+    rhel_baseline_ntp_servers: [ntp1.example.invalid, ntp2.example.invalid]
+    test_out: "{{ playbook_dir }}/../.state/test-render"
+  tasks:
+    - name: Ensure output directory
+      ansible.builtin.file:
+        path: "{{ test_out }}"
+        state: directory
+        mode: "0750"
+
+    - name: Render chrony.conf
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/rhel_baseline/templates/chrony.conf.j2"
+        dest: "{{ test_out }}/chrony.conf"
+        mode: "0640"
+
+    - name: Read rendered file
+      ansible.builtin.slurp:
+        src: "{{ test_out }}/chrony.conf"
+      register: test_rendered
+
+    - name: Assert one 'server' line per NTP server and nothing else surprising
+      ansible.builtin.assert:
+        that:
+          - (test_rendered.content | b64decode).splitlines() | select('match', '^server ') | list | length == 2
+          - "'server ntp1.example.invalid iburst' in (test_rendered.content | b64decode)"
+          - "'makestep 1.0 3' in (test_rendered.content | b64decode)"
+        quiet: true

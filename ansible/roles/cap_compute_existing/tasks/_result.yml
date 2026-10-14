@@ -1,0 +1,20 @@
+---
+# Expects: _existing_state ("present"|"absent")
+- name: Every disk role in the spec must be mapped in the profile
+  ansible.builtin.assert:
+    that: (cap_spec.disks | map(attribute='role') | difference(cap_cfg.disk_map.keys() | list)) | length == 0
+    fail_msg: >-
+      disk_map in the profile is missing roles:
+      {{ cap_spec.disks | map(attribute='role') | difference(cap_cfg.disk_map.keys() | list) }}
+    quiet: true
+
+- name: Build machine_result.v1 from profile configuration
+  ansible.builtin.set_fact:  # noqa: var-naming[no-role-prefix]
+    cap_result:
+      contract: machine_result.v1
+      state: "{{ _existing_state }}"
+      id: "existing-{{ cap_spec.name }}"
+      fqdn: "{{ cap_cfg.fqdn }}"
+      ip: "{{ cap_cfg.ip }}"
+      disk_map: "{{ cap_cfg.disk_map }}"
+      state_ref: "existing:{{ cap_cfg.fqdn }}"

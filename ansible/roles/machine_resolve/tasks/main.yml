@@ -1,0 +1,54 @@
+---
+# Turns a logical request + customer catalogue into a provider-neutral machine_spec.
+# Fails early with a clear message when a logical name is not in the catalogue.
+- name: Reject environments the profile does not allow
+  ansible.builtin.assert:
+    that: request.environment in profile.policy.allowed_environments
+    fail_msg: >-
+      Environment '{{ request.environment }}' is not allowed by profile '{{ profile.name }}'
+      (allowed: {{ profile.policy.allowed_environments | join(', ') }})
+    quiet: true
+
+- name: Reject unsupported node_count rather than silently ignoring it
+  ansible.builtin.assert:
+    that: (request.node_count | default(1)) == 1
+    fail_msg: "node_count > 1 is not implemented yet (HA/multi-node is a later slice)"
+    quiet: true
+
+- name: Resolve logical names against the catalogue
+  ansible.builtin.assert:
+    that:
+      - request.sizing in catalogue.sizing
+      - request.image in catalogue.images
+      - request.network_profile in catalogue.networks
+      - (request.placement | default(catalogue.defaults.placement)) in catalogue.placement
+    fail_msg: >-
+      Unknown logical value. sizing={{ request.sizing }} (known: {{ catalogue.sizing | list }}),
+      image={{ request.image }} (known: {{ catalogue.images | list }}),
+      network_profile={{ request.network_profile }} (known: {{ catalogue.networks | list }}),
+      placement={{ request.placement | default(catalogue.defaults.placement) }} (known: {{ catalogue.placement | list }})
+    quiet: true
+
+- name: Build machine spec
+  ansible.builtin.set_fact:  # noqa: var-naming[no-role-prefix]
+    machine_spec:
+      contract: machine_spec.v1
+      name: "{{ request.name }}"
+      cpu: "{{ catalogue.sizing[request.sizing].cpu }}"
+      memory_gb: "{{ catalogue.sizing[request.sizing].memory_gb }}"
+      image_ref: "{{ catalogue.images[request.image] }}"
+      placement_ref: "{{ catalogue.placement[request.placement | default(catalogue.defaults.placement)] }}"
+      network_ref: "{{ catalogue.networks[request.network_profile] }}"
+      disks:
+        - role: os
+          size_gb: "{{ catalogue.defaults.os_disk_gb }}"
+        - role: data
+          size_gb: "{{ request.data_disk_gb | default(catalogue.defaults.data_disk_gb) }}"
+          mount: "{{ catalogue.defaults.data_mount }}"
+          fs: "{{ catalogue.defaults.data_fs }}"
+      tags:
+        request_id: "{{ request.request_id }}"
+        environment: "{{ request.environment }}"
+        owner: "{{ request.owner | default('unassigned') }}"
+        ttl_days: "{{ request.ttl_days | default(0) | string }}"
+        managed_by: platform-kit

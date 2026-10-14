@@ -1,0 +1,11 @@
+---
+# Handlers run once, at the end of the play (or when flushed), only if notified.
+- name: Restart chronyd
+  ansible.builtin.service:
+    name: chronyd
+    state: restarted
+
+- name: Reload sshd
+  ansible.builtin.service:
+    name: sshd
+    state: reloaded

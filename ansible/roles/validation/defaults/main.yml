@@ -1,0 +1,16 @@
+---
+# Read-only checks. This role never changes the host; it records evidence and fails if any
+# error-severity check fails. Defaults mirror rhel_baseline so the two stay in step.
+validation_required_services:
+  - chronyd.service
+  - firewalld.service
+  - sshd.service
+validation_expected_mounts: []        # list of {path, fstype}
+validation_expected_sysctl:
+  kernel.randomize_va_space: "2"
+  net.ipv4.conf.all.accept_redirects: "0"
+validation_expected_sshd:             # keys are lower-case, as printed by 'sshd -T'
+  permitrootlogin: "no"
+  passwordauthentication: "no"
+  x11forwarding: "no"
+validation_report_dir: "{{ playbook_dir }}/../.state/reports"

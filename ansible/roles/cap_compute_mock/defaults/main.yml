@@ -1,0 +1,4 @@
+---
+# Where the mock driver keeps its "cloud" state. A real driver stores nothing locally:
+# its state lives in tags / the provider / an IaC state backend (see state_ref).
+cap_compute_mock_state_dir: "{{ playbook_dir }}/../.state/mock"

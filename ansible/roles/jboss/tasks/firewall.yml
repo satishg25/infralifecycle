@@ -1,0 +1,16 @@
+---
+# Nothing is opened unless the profile lists ports. The management port is never opened here.
+- name: Refuse to open the management port
+  ansible.builtin.assert:
+    that: item is not match('^' ~ jboss_management_port ~ '/')
+    fail_msg: "Port {{ item }} is the management interface - it must not be exposed"
+    quiet: true
+  loop: "{{ jboss_firewall_ports }}"
+
+- name: Open requested application ports
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ jboss_firewall_ports }}"

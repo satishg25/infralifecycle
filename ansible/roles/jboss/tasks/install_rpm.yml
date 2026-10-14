@@ -1,0 +1,33 @@
+---
+# RPM via Satellite: the repo must already be enabled on the host (the config_mgmt capability /
+# activation key does that). We check first so a missing repo gives a clear message instead of a
+# generic dnf error.
+- name: Check the package group is available
+  ansible.builtin.command: "dnf -q group info {{ jboss_rpm_group }}"
+  register: jboss_group_info
+  changed_when: false
+  failed_when: false
+
+- name: Fail clearly if the repository is not enabled
+  ansible.builtin.assert:
+    that: jboss_group_info.rc == 0
+    fail_msg: >-
+      Package group '{{ jboss_rpm_group }}' is not available. Enable
+      {{ jboss_repo_hint }} for this host (Satellite activation key / content view).
+    quiet: true
+
+- name: Install the EAP package group
+  ansible.builtin.dnf:
+    name: "@{{ jboss_rpm_group }}"
+    state: present
+
+- name: Confirm the install landed where we expect
+  ansible.builtin.stat:
+    path: "{{ jboss_home }}/bin/standalone.sh"
+  register: jboss_standalone_stat
+
+- name: Fail if EAP_HOME is not where jboss_home says
+  ansible.builtin.assert:
+    that: jboss_standalone_stat.stat.exists
+    fail_msg: "{{ jboss_home }}/bin/standalone.sh not found - check jboss_home for this EAP build"
+    quiet: true

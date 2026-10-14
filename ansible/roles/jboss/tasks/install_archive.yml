@@ -1,0 +1,10 @@
+---
+# Placeholder for the "internal artifact repo" source. To implement later:
+#   get_url (checksum: sha256:{{ jboss_archive_sha256 }}) -> unarchive -> create service account
+#   -> systemd unit -> set jboss_home / jboss_service_name for the archive layout.
+# Everything after install (service/configure/firewall/validate) is source-agnostic.
+- name: Fail - archive install is not implemented yet
+  ansible.builtin.fail:
+    msg: >-
+      jboss_install_source=archive is not implemented yet. Use rpm, or implement
+      roles/jboss/tasks/install_archive.yml (see the comments in that file).

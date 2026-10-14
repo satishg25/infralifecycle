@@ -1,0 +1,57 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read   # no deployment credentials in CI, ever
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO(hardening): pin both actions to full commit SHAs before sharing wider.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Contracts - sample request conforms
+        run: python tools/validate_contract.py contracts/request.v1.schema.json profiles/example-lab/sample-request.json
+
+      - name: Install pinned collections
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Lint (production profile)
+        working-directory: ansible
+        run: ansible-lint
+
+      - name: Syntax-check playbooks
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          P="-e profile_dir=../profiles/example-existing-host -e request_file=../profiles/example-existing-host/sample-request.json"
+          ansible-playbook playbooks/site.yml $P --syntax-check
+
+      - name: Template tests (no RHEL host needed)
+        working-directory: ansible
+        run: ansible-playbook tests/render_templates.yml
+
+      - name: Logic test - management exposure check
+        working-directory: ansible
+        run: ansible-playbook tests/ss_loopback.yml
+
+      - name: Mock lifecycle - apply, re-apply (must be idempotent), validate, revert
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          P="-e profile_dir=../profiles/example-lab -e request_file=../profiles/example-lab/sample-request.json"
+          ansible-playbook playbooks/provision.yml $P -e platform_action=apply
+          ansible-playbook playbooks/provision.yml $P -e platform_action=apply | tee /tmp/second.log
+          grep -E "localhost +:.*changed=0" /tmp/second.log   # idempotency gate
+          ansible-playbook playbooks/provision.yml $P -e platform_action=validate
+          ansible-playbook playbooks/provision.yml $P -e platform_action=revert

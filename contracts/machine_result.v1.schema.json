@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "machine_result.v1",
+  "title": "Provider-neutral machine result (output of compute drivers; the ONLY thing OS and workload roles may consume)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "state", "id", "fqdn", "ip", "disk_map", "state_ref"],
+  "properties": {
+    "contract": {"const": "machine_result.v1"},
+    "state": {"type": "string", "enum": ["present", "absent"]},
+    "id": {"type": "string"},
+    "fqdn": {"type": "string"},
+    "ip": {"type": "string", "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}$"},
+    "disk_map": {
+      "type": "object",
+      "description": "disk role -> stable device path (by-id / WWN), never /dev/sdX",
+      "additionalProperties": {"type": "string", "pattern": "^/dev/disk/by-"}
+    },
+    "state_ref": {"type": "string", "description": "How to find this resource again: tag query, resource id or IaC state key"}
+  }
+}

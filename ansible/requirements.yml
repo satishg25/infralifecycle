@@ -1,0 +1,8 @@
+---
+# Pin every collection. Install from your approved source (private automation hub in a customer
+# environment). The framework's own roles only need these two beyond ansible-core.
+collections:
+  - name: ansible.posix
+    version: "==2.2.2"
+  - name: community.general
+    version: "==13.5.0"

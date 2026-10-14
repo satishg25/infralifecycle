@@ -1,0 +1,31 @@
+---
+# Order matters: assert first (fail before changing anything), then packages (provides
+# chrony/firewalld/lvm), then each concern. Tags allow controlled reruns:
+#   ansible-playbook ... --tags baseline_storage
+- name: Assert platform preconditions
+  ansible.builtin.import_tasks: assert.yml
+  tags: [baseline, baseline_assert]
+
+- name: Install base packages
+  ansible.builtin.import_tasks: packages.yml
+  tags: [baseline, baseline_packages]
+
+- name: Configure time
+  ansible.builtin.import_tasks: time.yml
+  tags: [baseline, baseline_time]
+
+- name: Configure firewall
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [baseline, baseline_firewall]
+
+- name: Configure storage
+  ansible.builtin.import_tasks: storage.yml
+  tags: [baseline, baseline_storage]
+
+- name: Apply kernel parameters
+  ansible.builtin.import_tasks: sysctl.yml
+  tags: [baseline, baseline_sysctl]
+
+- name: Harden sshd
+  ansible.builtin.import_tasks: ssh.yml
+  tags: [baseline, baseline_ssh]

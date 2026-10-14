@@ -1,0 +1,23 @@
+---
+- name: Enable and start firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+
+# permanent + immediate: survives reboot AND applies now, without a firewall reload.
+- name: Allow required services
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ rhel_baseline_firewall_services }}"
+
+- name: Allow required ports
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ rhel_baseline_firewall_ports }}"

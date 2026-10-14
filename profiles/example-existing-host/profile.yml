@@ -1,0 +1,31 @@
+---
+# Bring-your-own-host profile: runs baseline/validation against a RHEL 8 VM you already have.
+# Replace the 192.0.2.x / .invalid placeholders (documentation-only values). Secrets never go here:
+# the SSH key comes from your AAP machine credential or ssh-agent.
+profile:
+  contract: profile.v1
+  name: example-existing-host
+  policy:
+    allow_mock: false
+    allowed_environments: [lab, dev]
+    mandatory_capabilities: []
+  access:
+    user: automation          # a non-root account with sudo
+    connection: ssh
+  baseline:
+    ntp_servers: [ntp.lab.example.invalid]
+    firewall_ports: []
+  middleware:
+    jboss:
+      install_source: rpm        # rpm (Satellite) now; archive (internal repo) later
+      bind_address: ""           # set to the host IP to serve beyond loopback
+      firewall_ports: []         # e.g. ["8080/tcp"]; TLS/8443 arrives with the tls role
+  capabilities:
+    compute:
+      driver: existing
+      config:
+        fqdn: vm01.lab.example.invalid
+        ip: 192.0.2.10
+        disk_map:
+          os: /dev/disk/by-id/REPLACE-os-disk
+          data: /dev/disk/by-id/REPLACE-data-disk

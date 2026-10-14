@@ -1,0 +1,90 @@
+---
+# Configure the machine(s) produced by provision.yml. Run via site.yml so the compute result
+# (an in-memory fact on localhost) is available. Nothing here knows which provider built the host.
+
+- name: Build in-memory inventory from the compute result
+  hosts: localhost
+  gather_facts: false
+  tags: [prepare]
+  tasks:
+    - name: Require a compute result
+      ansible.builtin.assert:
+        that: capability_dispatch_results.compute.state | default('absent') == 'present'
+        fail_msg: "No present compute result - run provision.yml (apply) first, e.g. via site.yml"
+        quiet: true
+
+    # Translate spec disks + driver disk_map into the volume list the baseline role consumes.
+    - name: Build data volume list
+      ansible.builtin.set_fact:
+        configure_data_volumes: >-
+          {{ configure_data_volumes | default([]) + [{
+               'role': item.role,
+               'device': capability_dispatch_results.compute.disk_map[item.role],
+               'vg': 'vg_' ~ item.role,
+               'lv': 'lv_' ~ item.role,
+               'mount': item.mount,
+               'fs': item.fs}] }}
+      loop: "{{ machine_spec.disks | selectattr('mount', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.role }}"
+
+    - name: Build expected mount list for validation
+      ansible.builtin.set_fact:
+        configure_expected_mounts: >-
+          {{ configure_expected_mounts | default([]) + [{'path': item.mount, 'fstype': item.fs}] }}
+      loop: "{{ configure_data_volumes | default([]) }}"
+      loop_control:
+        label: "{{ item.mount }}"
+
+    - name: Add the target host
+      ansible.builtin.add_host:
+        name: "{{ capability_dispatch_results.compute.fqdn }}"
+        groups: middleware_nodes
+        ansible_host: "{{ capability_dispatch_results.compute.ip }}"
+        ansible_user: "{{ profile.access.user }}"
+        ansible_connection: "{{ profile.access.connection | default('ssh') }}"
+        rhel_baseline_data_volumes: "{{ configure_data_volumes | default([]) }}"
+        validation_expected_mounts: "{{ configure_expected_mounts | default([]) }}"
+
+    - name: Show what will be configured (no secrets are ever in these values)
+      ansible.builtin.debug:
+        msg:
+          host: "{{ capability_dispatch_results.compute.fqdn }}"
+          data_volumes: "{{ configure_data_volumes | default([]) }}"
+          expected_mounts: "{{ configure_expected_mounts | default([]) }}"
+
+- name: Baseline and validate
+  hosts: middleware_nodes
+  become: true
+  gather_facts: true
+  vars:
+    # Customer-specific values arrive ONLY from the profile.
+    rhel_baseline_ntp_servers: "{{ hostvars['localhost']['profile']['baseline']['ntp_servers'] }}"
+    rhel_baseline_firewall_ports: "{{ hostvars['localhost']['profile']['baseline']['firewall_ports'] | default([]) }}"
+  roles:
+    - role: rhel_baseline
+      tags: [baseline]
+    - role: validation
+      tags: [validate]
+
+- name: Middleware
+  hosts: middleware_nodes
+  become: true
+  gather_facts: true
+  vars:
+    jboss_install_source: "{{ hostvars['localhost']['profile']['middleware']['jboss']['install_source'] | default('rpm') }}"
+    jboss_bind_address: "{{ hostvars['localhost']['profile']['middleware']['jboss']['bind_address'] | default('') }}"
+    jboss_firewall_ports: "{{ hostvars['localhost']['profile']['middleware']['jboss']['firewall_ports'] | default([]) }}"
+  tasks:
+    - name: Install and configure JBoss EAP
+      ansible.builtin.include_role:
+        name: jboss
+      when: (hostvars['localhost']['request']['middleware'] | default('none')) == 'jboss'
+      tags: [jboss]
+
+    - name: Validate JBoss EAP
+      ansible.builtin.include_role:
+        name: jboss
+        tasks_from: validate
+      when: (hostvars['localhost']['request']['middleware'] | default('none')) == 'jboss'
+      tags: [jboss, validate]

@@ -1,0 +1,100 @@
+---
+# Every check appends {check, ok, detail} to validation_results. All checks run even when one
+# fails (so the report is complete); the single assert at the end decides pass/fail.
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Start with an empty result list
+  ansible.builtin.set_fact:
+    validation_results: []
+
+- name: Check SELinux is enforcing
+  ansible.builtin.set_fact:
+    validation_results: >-
+      {{ validation_results + [{
+           'check': 'selinux_enforcing',
+           'ok': (ansible_facts['selinux']['mode'] | default('unknown')) == 'enforcing',
+           'detail': ansible_facts['selinux']['mode'] | default('unknown')}] }}
+
+- name: Check required services are running
+  ansible.builtin.set_fact:
+    validation_results: >-
+      {{ validation_results + [{
+           'check': 'service_running:' ~ item,
+           'ok': (ansible_facts['services'][item]['state'] | default('absent')) == 'running',
+           'detail': ansible_facts['services'][item]['state'] | default('absent')}] }}
+  loop: "{{ validation_required_services }}"
+
+- name: Check expected mounts
+  ansible.builtin.set_fact:
+    validation_results: >-
+      {{ validation_results + [{
+           'check': 'mount:' ~ item.path,
+           'ok': (ansible_facts['mounts'] | selectattr('mount', 'equalto', item.path)
+                  | selectattr('fstype', 'equalto', item.fstype) | list | length) == 1,
+           'detail': 'expected ' ~ item.fstype}] }}
+  loop: "{{ validation_expected_mounts }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Read live kernel parameters
+  ansible.builtin.command: "sysctl -n {{ item.key }}"
+  register: validation_sysctl_out
+  changed_when: false
+  failed_when: false
+  loop: "{{ validation_expected_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Check kernel parameters
+  ansible.builtin.set_fact:
+    validation_results: >-
+      {{ validation_results + [{
+           'check': 'sysctl:' ~ item.item.key,
+           'ok': (item.stdout | trim) == (item.item.value | string),
+           'detail': 'got ' ~ (item.stdout | trim) ~ ', want ' ~ (item.item.value | string)}] }}
+  loop: "{{ validation_sysctl_out.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+
+- name: Read effective sshd configuration
+  ansible.builtin.command: /usr/sbin/sshd -T
+  register: validation_sshd_out
+  changed_when: false
+  failed_when: false
+
+- name: Check effective sshd settings
+  ansible.builtin.set_fact:
+    validation_results: >-
+      {{ validation_results + [{
+           'check': 'sshd:' ~ item.key,
+           'ok': (validation_sshd_out.stdout_lines | select('match', '^' ~ item.key ~ ' ' ~ item.value ~ '$') | list | length) == 1,
+           'detail': 'want ' ~ item.key ~ ' ' ~ item.value}] }}
+  loop: "{{ validation_expected_sshd | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# Evidence is written on the CONTROLLER (delegate_to localhost) so it survives the target.
+- name: Ensure evidence directory exists
+  ansible.builtin.file:
+    path: "{{ validation_report_dir }}"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Write evidence report
+  ansible.builtin.copy:
+    dest: "{{ validation_report_dir }}/{{ inventory_hostname }}.json"
+    content: "{{ {'host': inventory_hostname, 'results': validation_results} | to_nice_json }}\n"
+    mode: "0640"
+  delegate_to: localhost
+  become: false
+
+- name: Fail if any check failed
+  ansible.builtin.assert:
+    that: validation_results | rejectattr('ok') | list | length == 0
+    fail_msg: >-
+      Validation failed: {{ validation_results | rejectattr('ok') | map(attribute='check') | list }}
+    success_msg: "All {{ validation_results | length }} checks passed"

@@ -1,0 +1,73 @@
+---
+# Why the management CLI and not config files: it is the supported, documented interface, it
+# validates what we write, and it does not depend on RPM file layouts. Each change follows the
+# idempotent pattern  READ -> compare -> WRITE only if different -> reload once at the end.
+# The CLI runs on the target over loopback ('--connect' uses local authentication as root).
+
+- name: Read the public interface binding
+  ansible.builtin.command:
+    argv:
+      - "{{ jboss_home }}/bin/jboss-cli.sh"
+      - --connect
+      - "--controller={{ jboss_management_host }}:{{ jboss_management_port }}"
+      - "--command=/interface=public:read-attribute(name=inet-address)"
+  register: jboss_iface_read
+  changed_when: false
+  when: jboss_bind_address | length > 0
+
+- name: Set the public interface binding
+  ansible.builtin.command:
+    argv:
+      - "{{ jboss_home }}/bin/jboss-cli.sh"
+      - --connect
+      - "--controller={{ jboss_management_host }}:{{ jboss_management_port }}"
+      - "--command=/interface=public:write-attribute(name=inet-address,value=${jboss.bind.address:{{ jboss_bind_address }}})"
+  register: jboss_iface_write
+  changed_when: true
+  when:
+    - jboss_bind_address | length > 0
+    - "('jboss.bind.address:' ~ jboss_bind_address ~ '}') not in jboss_iface_read.stdout"
+
+- name: Look for the default welcome content
+  ansible.builtin.command:
+    argv:
+      - "{{ jboss_home }}/bin/jboss-cli.sh"
+      - --connect
+      - "--controller={{ jboss_management_host }}:{{ jboss_management_port }}"
+      - "--command=/subsystem=undertow/server=default-server/host=default-host/location=\\/:read-resource"
+  register: jboss_welcome_read
+  changed_when: false
+  failed_when: false
+  when: jboss_remove_welcome_content | bool
+
+- name: Remove the default welcome content
+  ansible.builtin.command:
+    argv:
+      - "{{ jboss_home }}/bin/jboss-cli.sh"
+      - --connect
+      - "--controller={{ jboss_management_host }}:{{ jboss_management_port }}"
+      - "--command=/subsystem=undertow/server=default-server/host=default-host/location=\\/:remove"
+  register: jboss_welcome_remove
+  changed_when: true
+  when:
+    - jboss_remove_welcome_content | bool
+    - jboss_welcome_read.rc == 0
+
+- name: Reload the server once if anything changed
+  ansible.builtin.command:
+    argv:
+      - "{{ jboss_home }}/bin/jboss-cli.sh"
+      - --connect
+      - "--controller={{ jboss_management_host }}:{{ jboss_management_port }}"
+      - "--command=:reload"
+  changed_when: true
+  when: (jboss_iface_write is changed) or (jboss_welcome_remove is changed)
+
+- name: Wait for the management interface after reload
+  ansible.builtin.wait_for:
+    host: "{{ jboss_management_host }}"
+    port: "{{ jboss_management_port }}"
+    delay: 3
+    timeout: "{{ jboss_start_timeout }}"
+    state: started
+  when: (jboss_iface_write is changed) or (jboss_welcome_remove is changed)

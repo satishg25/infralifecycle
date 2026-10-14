@@ -1,0 +1,22 @@
+---
+argument_specs:
+  main:
+    short_description: Install and configure JBoss EAP 8 (standalone) from RPM, with a pluggable source
+    options: &opts
+      jboss_install_source: {type: str, default: rpm, choices: [rpm, archive]}
+      jboss_rpm_group: {type: str, default: jboss-eap8}
+      jboss_service_name: {type: str, default: eap8-standalone}
+      jboss_home: {type: path}
+      jboss_repo_hint: {type: str}
+      jboss_archive_url: {type: str}
+      jboss_archive_sha256: {type: str}
+      jboss_bind_address: {type: str, default: ""}
+      jboss_firewall_ports: {type: list, elements: str}
+      jboss_remove_welcome_content: {type: bool}
+      jboss_management_host: {type: str}
+      jboss_management_port: {type: int}
+      jboss_health_url: {type: str}
+      jboss_start_timeout: {type: int}
+  validate:
+    short_description: Read-only checks - service, health, management exposure, service account
+    options: *opts

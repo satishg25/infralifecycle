@@ -1,0 +1,11 @@
+---
+# Exercises the validation role's aggregation + evidence logic against THIS machine (read-only).
+# On a non-RHEL machine several checks are EXPECTED to fail; the point is that they are
+# recorded in the report and that the role fails closed.  Not part of CI.
+- name: Validation role smoke test
+  hosts: localhost
+  gather_facts: true
+  roles:
+    - role: validation
+      vars:
+        validation_report_dir: "{{ playbook_dir }}/../.state/reports"

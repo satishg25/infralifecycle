@@ -1,0 +1,14 @@
+---
+# validate: runs 'sshd -t' on the candidate file BEFORE it replaces sshd_config, so a bad edit
+# can never lock you out. The handler reloads (not restarts): existing sessions survive.
+- name: Harden sshd settings
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*#?\s*{{ item.key }}\s'
+    line: "{{ item.key }} {{ item.value }}"
+    validate: /usr/sbin/sshd -t -f %s
+    mode: "0600"
+  loop: "{{ rhel_baseline_sshd_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  notify: Reload sshd

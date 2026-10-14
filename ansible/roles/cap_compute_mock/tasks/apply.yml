@@ -1,0 +1,18 @@
+---
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _mock_state: present
+
+- name: Ensure mock state directory exists
+  ansible.builtin.file:
+    path: "{{ cap_compute_mock_state_dir }}"
+    state: directory
+    mode: "0750"
+
+# Idempotency demo: identical content => 'ok' on the second run, 'changed' only on first.
+- name: Record the machine in mock state
+  ansible.builtin.copy:
+    dest: "{{ cap_compute_mock_state_dir }}/{{ cap_spec.name }}.json"
+    content: "{{ {'spec': cap_spec, 'result': cap_result} | to_nice_json }}\n"
+    mode: "0640"

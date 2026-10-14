@@ -1,0 +1,10 @@
+---
+- name: Remove the machine from mock state
+  ansible.builtin.file:
+    path: "{{ cap_compute_mock_state_dir }}/{{ cap_spec.name }}.json"
+    state: absent
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _mock_state: absent

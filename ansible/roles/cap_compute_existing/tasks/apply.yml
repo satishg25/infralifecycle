@@ -1,0 +1,7 @@
+---
+# Bring-your-own-host: lets you run baseline/workload roles against any RHEL VM you already
+# have (an Azure lab VM, a customer test VM) with no provider code at all.
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _existing_state: present

@@ -1,0 +1,32 @@
+---
+argument_specs:
+  apply:
+    short_description: Adopt an already-provisioned host as the compute result (creates nothing)
+    options: &opts
+      cap_spec:
+        type: dict
+        required: true
+        options:
+          contract: {type: str, required: true, choices: [machine_spec.v1]}
+          name: {type: str, required: true}
+          cpu: {type: int, required: true}
+          memory_gb: {type: int, required: true}
+          image_ref: {type: str, required: true}
+          placement_ref: {type: str, required: true}
+          network_ref: {type: str, required: true}
+          disks: {type: list, elements: dict, required: true}
+          tags: {type: dict, required: true}
+          native: {type: dict, required: false}
+      cap_cfg:
+        type: dict
+        required: true
+        options:
+          fqdn: {type: str, required: true}
+          ip: {type: str, required: true}
+          disk_map: {type: dict, required: true}
+  validate:
+    short_description: Confirm the adopted host answers on SSH
+    options: *opts
+  revert:
+    short_description: Release the adoption only - never destroys the host
+    options: *opts

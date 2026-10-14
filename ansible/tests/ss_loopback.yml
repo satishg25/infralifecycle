@@ -1,0 +1,22 @@
+---
+# Pure-logic test of the jboss role's management-exposure check against sample ss output.
+- name: Test the management exposure expression
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cases:
+      - {name: loopback-only, want: pass, lines: ["LISTEN 0      50        127.0.0.1:9990      0.0.0.0:*"]}
+      - {name: ipv6-loopback, want: pass, lines: ["LISTEN 0      50            [::1]:9990         [::]:*"]}
+      - {name: wildcard, want: fail, lines: ["LISTEN 0      50          0.0.0.0:9990      0.0.0.0:*"]}
+      - {name: lan-ip, want: fail, lines: ["LISTEN 0      50         10.1.2.3:9990      0.0.0.0:*"]}
+      - {name: mixed, want: fail, lines: ["LISTEN 0 50 127.0.0.1:9990 0.0.0.0:*", "LISTEN 0 50 *:9990 *:*"]}
+  tasks:
+    - name: Evaluate the same expression the role uses
+      ansible.builtin.assert:
+        that: >-
+          (item.lines | map('split') | map(attribute='3')
+           | reject('match', '^(127\.0\.0\.1|\[::1\]):') | list | length == 0) == (item.want == 'pass')
+        quiet: true
+        fail_msg: "case {{ item.name }} mis-evaluated"
+      loop: "{{ cases }}"
+      loop_control: {label: "{{ item.name }}"}

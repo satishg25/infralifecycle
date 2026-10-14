@@ -1,0 +1,15 @@
+---
+argument_specs:
+  main:
+    short_description: Read-only host checks with a JSON evidence report
+    options:
+      validation_required_services: {type: list, elements: str}
+      validation_expected_mounts:
+        type: list
+        elements: dict
+        options:
+          path: {type: str, required: true}
+          fstype: {type: str, required: true}
+      validation_expected_sysctl: {type: dict}
+      validation_expected_sshd: {type: dict}
+      validation_report_dir: {type: str}

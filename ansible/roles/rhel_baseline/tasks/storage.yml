@@ -1,0 +1,59 @@
+---
+# LVM on a stable by-id device. Nothing here forces or wipes: if a device already holds data,
+# the modules fail instead of destroying it. That is deliberate.
+- name: Confirm each data device exists and is a block device
+  ansible.builtin.stat:
+    path: "{{ item.device }}"
+    follow: true
+  register: rhel_baseline_device_stat
+  loop: "{{ rhel_baseline_data_volumes }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Fail if a device is missing
+  ansible.builtin.assert:
+    that: item.stat.exists and item.stat.isblk
+    fail_msg: "Device for '{{ item.item.role }}' ({{ item.item.device }}) is missing or not a block device"
+    quiet: true
+  loop: "{{ rhel_baseline_device_stat.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Create volume groups
+  community.general.lvg:
+    vg: "{{ item.vg }}"
+    pvs: "{{ item.device }}"
+    state: present
+  loop: "{{ rhel_baseline_data_volumes }}"
+  loop_control:
+    label: "{{ item.vg }}"
+
+- name: Create logical volumes (use all free space)
+  community.general.lvol:
+    vg: "{{ item.vg }}"
+    lv: "{{ item.lv }}"
+    size: 100%FREE
+    state: present
+  loop: "{{ rhel_baseline_data_volumes }}"
+  loop_control:
+    label: "{{ item.lv }}"
+
+- name: Create filesystems (never forced)
+  community.general.filesystem:
+    fstype: "{{ item.fs }}"
+    dev: "/dev/{{ item.vg }}/{{ item.lv }}"
+    force: false
+  loop: "{{ rhel_baseline_data_volumes }}"
+  loop_control:
+    label: "{{ item.lv }}"
+
+- name: Mount filesystems and persist in fstab
+  ansible.posix.mount:
+    path: "{{ item.mount }}"
+    src: "/dev/mapper/{{ item.vg }}-{{ item.lv }}"
+    fstype: "{{ item.fs }}"
+    opts: "{{ rhel_baseline_mount_options }}"
+    state: mounted
+  loop: "{{ rhel_baseline_data_volumes }}"
+  loop_control:
+    label: "{{ item.mount }}"

@@ -1,0 +1,30 @@
+---
+# --- Install source seam -----------------------------------------------------------------
+# rpm     : package group from a Satellite-synced EAP repo (implemented)
+# archive : zip from an internal artifact repo (placeholder - fails with a clear message)
+# Switching later = change this one variable (plus the archive_* vars) in the profile.
+jboss_install_source: rpm
+
+# --- RPM facts (verified against Red Hat EAP 8 installation docs) ---------------------------
+jboss_rpm_group: jboss-eap8            # JDK 17; use jboss-eap8-jdk11 for JDK 11 on RHEL 8
+jboss_service_name: eap8-standalone    # eap8-domain is deliberately NOT supported here
+jboss_home: /opt/rh/eap8/root/usr/share/wildfly
+jboss_repo_hint: "the EAP 8 repository (typically jb-eap-8.0-for-rhel-8-x86_64-rpms) in the Satellite content view"
+
+# --- Archive placeholders (used when jboss_install_source: archive) ------------------------
+jboss_archive_url: ""
+jboss_archive_sha256: ""
+
+# --- Network exposure: secure by default ---------------------------------------------------
+# Empty = leave EAP's default (loopback only). Management (9990) is NEVER rebound by this role.
+jboss_bind_address: ""
+jboss_firewall_ports: []               # e.g. ["8080/tcp"]; nothing opens unless the profile asks
+
+# --- Hardening -----------------------------------------------------------------------------
+jboss_remove_welcome_content: true     # no default welcome/sample content
+
+# --- Health --------------------------------------------------------------------------------
+jboss_management_host: 127.0.0.1
+jboss_management_port: 9990
+jboss_health_url: "http://127.0.0.1:9990/health/ready"
+jboss_start_timeout: 180

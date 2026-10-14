@@ -1,0 +1,28 @@
+---
+argument_specs:
+  main:
+    short_description: RHEL 8 baseline - packages, time, firewall, storage, sysctl, sshd
+    description:
+      - Fails closed on unsupported OS, SELinux not enforcing, or missing NTP servers.
+      - Uses only stable device paths for storage and never forces a filesystem.
+    options:
+      rhel_baseline_allowed_distributions: {type: list, elements: str, default: [RedHat]}
+      rhel_baseline_supported_majors: {type: list, elements: str, default: ["8"]}
+      rhel_baseline_packages: {type: list, elements: str}
+      rhel_baseline_timezone: {type: str, default: UTC}
+      rhel_baseline_ntp_servers: {type: list, elements: str, required: true}
+      rhel_baseline_firewall_services: {type: list, elements: str}
+      rhel_baseline_firewall_ports: {type: list, elements: str}
+      rhel_baseline_sysctl: {type: dict}
+      rhel_baseline_sshd_settings: {type: dict}
+      rhel_baseline_mount_options: {type: str}
+      rhel_baseline_data_volumes:
+        type: list
+        elements: dict
+        options:
+          role: {type: str, required: true}
+          device: {type: str, required: true}
+          vg: {type: str, required: true}
+          lv: {type: str, required: true}
+          mount: {type: str, required: true}
+          fs: {type: str, required: true, choices: [xfs, ext4]}

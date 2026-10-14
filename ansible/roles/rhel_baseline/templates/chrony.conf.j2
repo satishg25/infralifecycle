@@ -1,0 +1,10 @@
+# Managed by platform-kit (role rhel_baseline) - local edits will be overwritten
+{% for server in rhel_baseline_ntp_servers %}
+server {{ server }} iburst
+{% endfor %}
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+keyfile /etc/chrony.keys
+leapsectz right/UTC
+logdir /var/log/chrony

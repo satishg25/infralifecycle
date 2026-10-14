@@ -1,0 +1,27 @@
+---
+# Customer profile: the ONLY place customer/provider specifics live.
+# Roles never read provider names or IDs directly; they consume contracts.
+profile:
+  contract: profile.v1
+  name: example-lab
+  policy:
+    allow_mock: true            # must be false for any real customer environment
+    allowed_environments: [lab, dev]
+    mandatory_capabilities: []  # real customers list e.g. identity, config_mgmt, cmdb, backup
+  access:
+    user: automation
+    connection: ssh        # mock IPs are unreachable on purpose: configure.yml cannot touch a real host
+  baseline:
+    ntp_servers: [ntp.lab.example.invalid]
+    firewall_ports: []
+  middleware:
+    jboss:
+      install_source: rpm        # rpm (Satellite) now; archive (internal repo) later
+      bind_address: ""           # set to the host IP to serve beyond loopback
+      firewall_ports: []         # e.g. ["8080/tcp"]; TLS/8443 arrives with the tls role
+  capabilities:
+    compute:
+      driver: mock              # later: azure | vmware | terraform
+      config:
+        domain: lab.example.invalid
+        ip_prefix: "10.99.0."

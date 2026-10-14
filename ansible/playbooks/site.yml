@@ -1,0 +1,11 @@
+---
+# End-to-end: resolve + compute (apply), then baseline + validation on the resulting host.
+#   ansible-playbook playbooks/site.yml -e profile_dir=... -e request_file=...
+# Use provision.yml directly for validate/revert of the compute step.
+- name: Provision
+  ansible.builtin.import_playbook: provision.yml
+  vars:
+    platform_action: apply
+
+- name: Configure
+  ansible.builtin.import_playbook: configure.yml

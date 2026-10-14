@@ -1,0 +1,17 @@
+---
+# Shared by apply/validate/revert: builds the contract result deterministically from the
+# spec. Real drivers get these values from the provider API instead.
+# Expects: _mock_state ("present"|"absent")
+- name: Build machine_result.v1
+  ansible.builtin.set_fact:  # noqa: var-naming[no-role-prefix]
+    cap_result:
+      contract: machine_result.v1
+      state: "{{ _mock_state }}"
+      id: "mock-{{ cap_spec.name }}"
+      fqdn: "{{ cap_spec.name }}.{{ cap_cfg.domain }}"
+      ip: "{{ cap_cfg.ip_prefix }}{{ ((cap_spec.name | hash('sha1'))[:4] | int(base=16)) % 200 + 10 }}"
+      disk_map: >-
+        {{ dict(cap_spec.disks | map(attribute='role')
+             | zip(cap_spec.disks | map(attribute='role')
+                   | map('regex_replace', '^', '/dev/disk/by-id/mock-' ~ cap_spec.name ~ '-'))) }}
+      state_ref: "tag:request_id={{ cap_spec.tags.request_id }}"

@@ -1,0 +1,21 @@
+---
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ rhel_baseline_timezone }}"
+
+# Template + handler pattern: the file is rewritten only if content differs, and chronyd is
+# restarted only when it was rewritten.
+- name: Render chrony configuration
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chronyd
+
+- name: Enable and start chronyd
+  ansible.builtin.service:
+    name: chronyd
+    state: started
+    enabled: true
