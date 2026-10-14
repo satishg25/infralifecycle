@@ -52,7 +52,7 @@ body:
   attributes:
     label: Middleware
     options:
-    - none
+    - no-middleware
     - jboss
   validations:
     required: true
@@ -78,7 +78,7 @@ body:
   validations:
     required: false
 - type: checkboxes
-  id: _confirm
+  id: confirm
   attributes:
     label: Confirmation
     options:

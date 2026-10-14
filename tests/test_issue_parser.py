@@ -113,5 +113,23 @@ class ParserTests(unittest.TestCase):
         self.assertNotEqual(validate(req), 0)
 
 
+
+class FormCompatTests(unittest.TestCase):
+    def test_no_middleware_maps_to_none(self):
+        body = GOOD.replace("### Middleware\n\njboss", "### Middleware\n\nno-middleware")
+        req, errors = convert(body, 7)
+        self.assertEqual(errors, [])
+        self.assertEqual(req["middleware"], "none")
+
+    def test_generated_form_avoids_github_reserved_values(self):
+        import yaml
+        form = yaml.safe_load((ROOT / ".github/ISSUE_TEMPLATE/platform-request.yml").read_text())
+        for item in form["body"]:
+            self.assertRegex(item["id"], r"^[A-Za-z0-9-][A-Za-z0-9_-]*$")
+            for opt in item["attributes"].get("options", []):
+                text = opt["label"] if isinstance(opt, dict) else opt
+                self.assertNotEqual(text.strip().lower(), "none")
+
+
 if __name__ == "__main__":
     unittest.main()

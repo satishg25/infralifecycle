@@ -24,3 +24,7 @@ INT_FIELDS = {"data_disk_gb", "ttl_days"}
 LABEL_TO_FIELD = {label: field for field, label, _kind, _req in FIELDS}
 NO_RESPONSE = "_No response_"
 TITLE_PREFIX = "[platform] "
+
+# GitHub reserves the dropdown option "None", so the form offers a different word and the
+# parser maps it back to the value request.v1 expects.
+FORM_TO_REQUEST_VALUE = {"middleware": {"no-middleware": "none"}}

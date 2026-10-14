@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from form_fields import (CONFIRM_TEXT, FIELDS, INT_FIELDS, LABEL_TO_FIELD,  # noqa: E402
-                         NO_RESPONSE)
+from form_fields import (CONFIRM_TEXT, FIELDS, FORM_TO_REQUEST_VALUE, INT_FIELDS,  # noqa: E402
+                         LABEL_TO_FIELD, NO_RESPONSE)
 
 MAX_BODY = 20_000
 
@@ -63,7 +63,7 @@ def convert(body: str, issue_number: int) -> tuple[dict, list[str]]:
                 continue
             request[field] = int(raw)
         else:
-            request[field] = raw
+            request[field] = FORM_TO_REQUEST_VALUE.get(field, {}).get(raw, raw)
     return request, errors
 
 
