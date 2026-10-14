@@ -24,6 +24,8 @@ Read the file, run it, break it on purpose. Each concept maps to something real 
 | 18 | Pluggable behaviour via a variable (`include_tasks: install_{{ x }}.yml`) | `roles/jboss/tasks/main.yml` | Implement `install_archive.yml` |
 | 19 | Idempotent READ -> compare -> WRITE for non-module tools (CLI) | `roles/jboss/tasks/configure.yml` | Run twice; second run should skip the writes |
 | 20 | Testing pure logic in isolation | `tests/ss_loopback.yml` | Add a failing case and watch it caught |
+| 21 | Check mode (`--check --diff`) and its limits; `check_mode: false`, `ansible_check_mode` | `roles/jboss/tasks/install_rpm.yml`, `main.yml` | Plan on a fresh host and see what is skipped |
+| 22 | Treating input as hostile (allow-list parse -> schema -> JSON file) | `tools/issue_to_request.py`, `tests/test_issue_parser.py` | Add a nasty test case |
 
 ## Next concepts
 `become` deep-dive, `block/rescue/always`, Execution Environments (`ansible-builder`), Molecule with UBI-init, then AAP (project / job template / credentials / survey / workflow).

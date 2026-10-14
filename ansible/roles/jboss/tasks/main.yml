@@ -11,10 +11,12 @@
 
 - name: Start the service
   ansible.builtin.import_tasks: service.yml
+  when: not ansible_check_mode   # needs the installed unit; a plan cannot preview it
   tags: [jboss, jboss_service]
 
 - name: Configure through the management CLI
   ansible.builtin.import_tasks: configure.yml
+  when: not ansible_check_mode   # needs a running server
   tags: [jboss, jboss_configure]
 
 - name: Open firewall ports requested by the profile

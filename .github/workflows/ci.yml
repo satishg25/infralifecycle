@@ -22,6 +22,12 @@ jobs:
       - name: Contracts - sample request conforms
         run: python tools/validate_contract.py contracts/request.v1.schema.json profiles/example-lab/sample-request.json
 
+      - name: Issue form is in step with the profile
+        run: python tools/gen_issue_form.py profiles/example-lab --check
+
+      - name: Parser unit tests
+        run: python -m unittest discover -s tests
+
       - name: Install pinned collections
         working-directory: ansible
         run: ansible-galaxy collection install -r requirements.yml

@@ -65,6 +65,7 @@
     - role: rhel_baseline
       tags: [baseline]
     - role: validation
+      when: not ansible_check_mode   # validates real state; meaningless in a plan
       tags: [validate]
 
 - name: Middleware
@@ -86,5 +87,7 @@
       ansible.builtin.include_role:
         name: jboss
         tasks_from: validate
-      when: (hostvars['localhost']['request']['middleware'] | default('none')) == 'jboss'
+      when:
+        - not ansible_check_mode
+        - (hostvars['localhost']['request']['middleware'] | default('none')) == 'jboss'
       tags: [jboss, validate]

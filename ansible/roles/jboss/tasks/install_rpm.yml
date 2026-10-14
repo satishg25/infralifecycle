@@ -7,6 +7,7 @@
   register: jboss_group_info
   changed_when: false
   failed_when: false
+  check_mode: false   # read-only, so it is safe (and needed) to run during a plan
 
 - name: Fail clearly if the repository is not enabled
   ansible.builtin.assert:
@@ -25,9 +26,11 @@
   ansible.builtin.stat:
     path: "{{ jboss_home }}/bin/standalone.sh"
   register: jboss_standalone_stat
+  when: not ansible_check_mode
 
 - name: Fail if EAP_HOME is not where jboss_home says
   ansible.builtin.assert:
     that: jboss_standalone_stat.stat.exists
     fail_msg: "{{ jboss_home }}/bin/standalone.sh not found - check jboss_home for this EAP build"
     quiet: true
+  when: not ansible_check_mode

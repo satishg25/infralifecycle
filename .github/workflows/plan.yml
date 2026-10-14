@@ -1,0 +1,148 @@
+name: plan
+
+# Issue Form -> strict parse -> schema validation -> Ansible check mode ("plan") -> comment.
+# This workflow is READ-ONLY: it never applies. Apply will be a separate, approved workflow.
+#
+# Trust model
+#  * Runs from the DEFAULT BRANCH (issues events), so an issue can never change the code that runs.
+#  * Only OWNER / MEMBER / COLLABORATOR authors are processed.
+#  * The issue body is passed through env vars only, parsed by an allow-list parser, then
+#    validated by JSON Schema before any credential is loaded. Values reach Ansible via a JSON file.
+#  * Which profile / playbook is planned comes from repo variables, never from the issue.
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: plan-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    if: >-
+      startsWith(github.event.issue.title, '[platform] ') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    # Use a self-hosted runner (label in vars.PLAN_RUNNER) when the plan must reach a private lab VM.
+    runs-on: ${{ vars.PLAN_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    env:
+      PLATFORM_PROFILE_DIR: ${{ vars.PLATFORM_PROFILE_DIR || 'profiles/example-lab' }}
+      PLAN_PLAYBOOK: ${{ vars.PLAN_PLAYBOOK || 'provision.yml' }}
+      HAS_SSH_KEY: ${{ secrets.LAB_SSH_KEY != '' }}
+    steps:
+      # TODO(hardening): pin actions to full commit SHAs.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tooling
+        shell: bash
+        run: pip install -r requirements-dev.txt
+
+      - name: Install pinned collections
+        shell: bash
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Parse the issue form into request.json
+        id: parse
+        shell: bash
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          mkdir -p build
+          python tools/issue_to_request.py build/request.json 2>&1 | tee build/parse.log
+
+      - name: Validate against the request contract
+        id: validate
+        if: steps.parse.outcome == 'success'
+        shell: bash
+        run: python tools/validate_contract.py contracts/request.v1.schema.json build/request.json 2>&1 | tee build/validate.log
+
+      # Optional: only when a lab SSH key secret exists. Use a dedicated, low-privilege lab account.
+      - name: Load lab SSH key
+        if: env.HAS_SSH_KEY == 'true' && steps.validate.outcome == 'success'
+        shell: bash
+        env:
+          LAB_SSH_KEY: ${{ secrets.LAB_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.LAB_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS" || { echo "Set repo variable LAB_SSH_KNOWN_HOSTS (host key checking stays ON)"; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$LAB_SSH_KEY" > ~/.ssh/id_plan
+          chmod 600 ~/.ssh/id_plan
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          echo "ANSIBLE_PRIVATE_KEY_FILE=$HOME/.ssh/id_plan" >> "$GITHUB_ENV"
+
+      - name: Plan (ansible-playbook --check --diff)
+        id: plan
+        if: steps.validate.outcome == 'success'
+        shell: bash
+        working-directory: ansible
+        env:
+          ANSIBLE_NOCOLOR: "1"
+        run: |
+          case "$PLAN_PLAYBOOK" in
+            provision.yml|site.yml) ;;
+            *) echo "PLAN_PLAYBOOK must be provision.yml or site.yml"; exit 1 ;;
+          esac
+          ansible-playbook "playbooks/${PLAN_PLAYBOOK}" \
+            -e "profile_dir=../${PLATFORM_PROFILE_DIR}" \
+            -e "request_file=../build/request.json" \
+            --check --diff 2>&1 | tee ../build/plan.log
+
+      - name: Post the result on the issue
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          OUT_PARSE: ${{ steps.parse.outcome }}
+          OUT_VALIDATE: ${{ steps.validate.outcome }}
+          OUT_PLAN: ${{ steps.plan.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const read = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '');
+            const fence = (s) => '```text\n' + s.replace(/```/g, "'''").trimEnd() + '\n```';
+            const MAX = 55000;
+            const clip = (s) => (s.length > MAX ? '... (truncated) ...\n' + s.slice(-MAX) : s);
+            const marker = '<!-- platform-plan -->';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const o = process.env;
+            let body = marker + '\n';
+            if (o.OUT_PARSE !== 'success') {
+              body += '### :x: Request could not be read\n' + fence(read('build/parse.log'));
+            } else if (o.OUT_VALIDATE !== 'success') {
+              body += '### :x: Request failed validation\n' + fence(read('build/validate.log'));
+            } else {
+              const icon = o.OUT_PLAN === 'success' ? ':white_check_mark:' : ':x:';
+              body += `### ${icon} Plan ${o.OUT_PLAN === 'success' ? 'completed' : 'failed'}\n`;
+              body += '<details><summary>Request</summary>\n\n' + fence(read('build/request.json')) + '\n</details>\n\n';
+              body += fence(clip(read('build/plan.log')));
+              body += '\n\n> Best-effort preview from Ansible check mode: tasks that depend on earlier changes ' +
+                      '(for example starting a service that is not installed yet) are skipped or may differ on apply. ' +
+                      'Nothing was changed.';
+            }
+            body += `\n\n[Workflow run](${run})`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100 });
+            const mine = comments.find((c) => c.user.type === 'Bot' && c.body.startsWith(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
+
+      - name: Fail the run if any step failed
+        if: always() && (steps.parse.outcome == 'failure' || steps.validate.outcome == 'failure' || steps.plan.outcome == 'failure')
+        shell: bash
+        run: exit 1

@@ -60,6 +60,15 @@ ansible-playbook playbooks/site.yml $P                  # second run: changed=0 
 ```
 Evidence lands in `ansible/.state/reports/<host>.json`. Use `--tags baseline_storage` etc. for controlled reruns.
 
+## GitHub intake: form -> plan (read-only)
+1. Create a **private** repo from this code. Regenerate the form for your profile:
+   `python tools/gen_issue_form.py profiles/example-lab` (dropdowns come from the profile catalogue).
+2. Optional repo **variables**: `PLATFORM_PROFILE_DIR` (default `profiles/example-lab`), `PLAN_PLAYBOOK` (`provision.yml` or `site.yml`), `PLAN_RUNNER` (self-hosted runner label).
+3. Open **New issue -> Platform request**. The `plan` workflow parses the form (allow-list parser), validates it against `request.v1`, runs `ansible-playbook --check --diff`, and comments the result. Edit the issue to re-plan.
+4. To plan against a real lab VM: use the `example-existing-host`-style profile with `PLAN_PLAYBOOK=site.yml`, a self-hosted runner that can reach the VM, secret `LAB_SSH_KEY` (dedicated low-privilege account) and variable `LAB_SSH_KNOWN_HOSTS` (host key checking stays on).
+
+**What the plan is and is not.** It is a best-effort Ansible *check mode* preview, not `terraform plan`: it shows the resolved request, every gate (policy, catalogue, OS, contract) and the changes modules can predict. Steps that need earlier changes to exist (starting an uninstalled service, the JBoss CLI, validation) are skipped in a plan and run on apply. Nothing is changed. **Apply is not built yet** - it will be a separate workflow with an approval gate (approver != requester, payload hash frozen at approval).
+
 ## Add a driver
 1. Create `roles/cap_<capability>_<driver>/` with `tasks/{apply,validate,revert}.yml`.
 2. Declare inputs in `meta/argument_specs.yml` (one block per entry point).
@@ -81,6 +90,7 @@ Copy `profiles/example-lab/`, set `policy.allow_mock: false`, bind real drivers,
 | Mock lifecycle + idempotency, failure gates | Storage on a real by-id disk, mounts |
 | `add_host` + volume mapping, template rendering | Handlers firing on change; second-run `changed=0` |
 | Baseline and jboss fail closed on non-RHEL; bad `jboss_install_source` and bind address rejected | `validation` PASS results on a hardened host |
+| Issue-body parser (11 unit tests incl. injection/duplicate/oversize), form generator, check-mode plan on the mock driver | The GitHub workflow itself (`plan.yml`) - never executed; first run on GitHub may need small fixes |
 | Management-exposure check logic against sample `ss` output | EAP RPM install from Satellite, CLI changes, `/health/ready`, service account |
 
 ## Roadmap (build one slice at a time)
