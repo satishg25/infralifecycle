@@ -1,0 +1,12 @@
+---
+# Expects: _vmware_state ("present"|"absent"), cap_compute_vmware_ip, cap_compute_vmware_disk_map
+- name: Build machine_result.v1
+  ansible.builtin.set_fact:  # noqa: var-naming[no-role-prefix]
+    cap_result:
+      contract: machine_result.v1
+      state: "{{ _vmware_state }}"
+      id: "{{ cap_compute_vmware_id }}"
+      fqdn: "{{ cap_compute_vmware_fqdn }}"
+      ip: "{{ cap_compute_vmware_ip }}"
+      disk_map: "{{ cap_compute_vmware_disk_map }}"
+      state_ref: "{{ cap_compute_vmware_id }}"

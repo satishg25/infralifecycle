@@ -1,0 +1,8 @@
+---
+# Names must start with a letter or digit, so '.' and '..' path segments can never match.
+cap_compute_vmware_ref_pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
+cap_compute_vmware_placement_pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}/[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
+cap_compute_vmware_network_pattern: '^[A-Za-z0-9][A-Za-z0-9._ -]{0,79}$'
+cap_compute_vmware_path_pattern: '^/?[A-Za-z0-9][A-Za-z0-9._ -]*(/[A-Za-z0-9][A-Za-z0-9._ -]*)*$'
+# SCSI unit 7 is reserved for the controller itself; at most 15 usable units on one controller.
+cap_compute_vmware_max_disks: 15

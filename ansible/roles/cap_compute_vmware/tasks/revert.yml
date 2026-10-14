@@ -1,0 +1,51 @@
+---
+# Blast-radius guard: only a VM whose annotation carries OUR marker and THIS request id may be
+# deleted. A VM with the same name but different ownership is never touched.
+- name: Prepare and validate VMware values
+  ansible.builtin.include_tasks: _prepare.yml
+
+- name: Remove the VM and its disks
+  module_defaults:
+    group/community.vmware.vmware:
+      hostname: "{{ cap_compute_vmware_cfg.vcenter_hostname | default(omit) }}"
+      validate_certs: "{{ cap_compute_vmware_cfg.validate_certs | bool }}"
+  block:
+    # The info module fails when the VM is absent; that is the normal "already gone" case.
+    - name: Look up the VM
+      community.vmware.vmware_guest_info:
+        datacenter: "{{ cap_compute_vmware_datacenter }}"
+        folder: "{{ cap_compute_vmware_folder }}"
+        name: "{{ cap_spec.name }}"
+      register: cap_compute_vmware_vm
+      failed_when: cap_compute_vmware_vm is failed and 'non-existing' not in (cap_compute_vmware_vm.msg | default(''))
+
+    - name: Record whether the VM exists
+      ansible.builtin.set_fact:
+        cap_compute_vmware_exists: "{{ cap_compute_vmware_vm is not failed and cap_compute_vmware_vm.instance is defined }}"
+
+    - name: Refuse to delete a VM this platform does not own for this request
+      ansible.builtin.assert:
+        that:
+          - "'managed_by=platform-kit' in cap_compute_vmware_vm.instance.annotation.split()"
+          - ('request_id=' ~ cap_spec.tags.request_id) in cap_compute_vmware_vm.instance.annotation.split()
+        fail_msg: >-
+          VM '{{ cap_spec.name }}' exists but is not marked managed_by=platform-kit with
+          request_id={{ cap_spec.tags.request_id }} - refusing to delete it
+        quiet: true
+      when: cap_compute_vmware_exists | bool
+
+    - name: Power off and delete the VM with its disks
+      community.vmware.vmware_guest:
+        datacenter: "{{ cap_compute_vmware_datacenter }}"
+        folder: "{{ cap_compute_vmware_folder }}"
+        name: "{{ cap_spec.name }}"
+        state: absent
+        force: true
+      when: cap_compute_vmware_exists | bool
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _vmware_state: absent
+    cap_compute_vmware_ip: 0.0.0.0
+    cap_compute_vmware_disk_map: {}

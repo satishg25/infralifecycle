@@ -1,0 +1,12 @@
+---
+# Expects: _azure_state ("present"|"absent") and cap_compute_azure_ip
+- name: Build machine_result.v1
+  ansible.builtin.set_fact:  # noqa: var-naming[no-role-prefix]
+    cap_result:
+      contract: machine_result.v1
+      state: "{{ _azure_state }}"
+      id: "{{ cap_compute_azure_vm_id }}"
+      fqdn: "{{ cap_spec.name }}.{{ cap_compute_azure_cfg.domain }}"
+      ip: "{{ cap_compute_azure_ip }}"
+      disk_map: "{{ cap_compute_azure_disk_map }}"
+      state_ref: "azure:{{ cap_compute_azure_vm_id }}"

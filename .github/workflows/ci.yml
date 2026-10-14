@@ -23,6 +23,9 @@ jobs:
       - name: Contracts - sample request conforms
         run: python tools/validate_contract.py contracts/request.v1.schema.json profiles/example-lab/sample-request.json
 
+      - name: Contracts - azure sample request conforms
+        run: python tools/validate_contract.py contracts/request.v1.schema.json profiles/example-azure-lab/sample-request.json
+
       - name: Issue form is in step with the profile
         run: python tools/gen_issue_form.py profiles/example-lab --check
 
@@ -43,10 +46,32 @@ jobs:
           set -euo pipefail
           P="-e profile_dir=../profiles/example-existing-host -e request_file=../profiles/example-existing-host/sample-request.json"
           ansible-playbook playbooks/site.yml $P --syntax-check
+          A="-e profile_dir=../profiles/example-azure-lab -e request_file=../profiles/example-azure-lab/sample-request.json"
+          ansible-playbook playbooks/provision.yml $A --syntax-check
+          W="-e profile_dir=../profiles/example-vmware-lab -e request_file=../profiles/example-vmware-lab/sample-request.json"
+          ansible-playbook playbooks/provision.yml $W --syntax-check
+          ansible-playbook playbooks/thin/jboss_standalone.yml -i localhost, -e @../examples/baloise/jboss_standalone.vars.yml --syntax-check
 
       - name: Template tests (no RHEL host needed)
         working-directory: ansible
         run: ansible-playbook tests/render_templates.yml
+
+      - name: Logic test - azure driver validation and derivation (no subscription needed)
+        working-directory: ansible
+        run: ansible-playbook tests/azure_prepare.yml
+
+      - name: Logic test - vmware driver validation, derivation and disk map (no vCenter needed)
+        working-directory: ansible
+        run: ansible-playbook tests/vmware_prepare.yml
+
+      - name: Thin-layer export is self-contained (no framework words, lints clean)
+        run: |
+          set -euo pipefail
+          python tools/export_thin.py "$RUNNER_TEMP/thin" --force
+          cd "$RUNNER_TEMP/thin"
+          ansible-galaxy collection install -r requirements.yml
+          ansible-playbook playbooks/jboss_standalone.yml -i inventory.yml -e @examples/jboss_standalone.vars.yml --syntax-check
+          ansible-lint
 
       - name: Logic test - management exposure check
         working-directory: ansible

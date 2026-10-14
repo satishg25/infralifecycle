@@ -1,0 +1,11 @@
+---
+# Driver defaults. The profile's capabilities.compute.config is merged over these
+# (profile wins), so a customer only states what differs.
+cap_compute_azure_defaults:
+  auth_source: auto            # auto | cli | env | msi | credential_file - never put secrets in the profile
+  os_disk_type: Premium_LRS
+  data_disk_type: Premium_LRS
+  os_disk_caching: ReadWrite
+  data_disk_caching: ReadOnly
+  encryption_at_host: true     # needs the EncryptionAtHost feature registered on the subscription
+  system_assigned_identity: false   # least privilege: no identity unless a workload needs one

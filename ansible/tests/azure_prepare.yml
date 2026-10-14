@@ -1,0 +1,80 @@
+---
+# Logic test for the azure driver's validation and derivation. No subscription or collection calls:
+# only roles/cap_compute_azure/tasks/_prepare.yml runs. Good input must derive correct values;
+# each bad input must be rejected (fail closed).
+- name: Azure driver - prepare logic
+  hosts: localhost
+  gather_facts: false
+  vars:
+    good_spec:
+      contract: machine_spec.v1
+      name: app01
+      cpu: 4
+      memory_gb: 16
+      image_ref: "RedHat:RHEL:8-lvm-gen2:latest"
+      placement_ref: "uksouth:1"
+      network_ref: /subscriptions/s1/resourceGroups/net-rg/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/snet1
+      disks:
+        - {role: os, size_gb: 64}
+        - {role: data, size_gb: 100, mount: /opt/app, fs: xfs}
+        - {role: logs, size_gb: 50, mount: /var/log/app, fs: xfs}
+      tags: {request_id: REQ-0001}
+    good_cfg:
+      subscription_id: s1
+      resource_group: vm-rg
+      domain: lab.example.invalid
+      admin_username: azureuser
+      admin_ssh_public_key: "ssh-ed25519 AAAAexample lab"
+      vm_size_map: {"4x16": Standard_D4s_v5}
+    cases:
+      - {name: bad image, spec: {image_ref: "not-a-urn"}}
+      - {name: bad subnet, spec: {network_ref: "subnet1"}}
+      - {name: bad placement, spec: {placement_ref: "UK South"}}
+      - {name: size not mapped, spec: {cpu: 64}}
+      - {name: two os disks, spec: {disks: [{role: os, size_gb: 1}, {role: os, size_gb: 1}]}}
+      - {name: reserved user, cfg: {admin_username: root}}
+      - {name: not a public key, cfg: {admin_ssh_public_key: "password123"}}
+  tasks:
+    - name: Good input derives the expected Azure values
+      vars:
+        cap_spec: "{{ good_spec }}"
+        cap_cfg: "{{ good_cfg }}"
+      block:
+        - name: Run prepare
+          ansible.builtin.include_role:
+            name: cap_compute_azure
+            tasks_from: _prepare
+        - name: Check derived values
+          ansible.builtin.assert:
+            that:
+              - cap_compute_azure_location == 'uksouth'
+              - cap_compute_azure_zones == ['1']
+              - cap_compute_azure_subnet == 'snet1'
+              - cap_compute_azure_vm_id == '/subscriptions/s1/resourceGroups/vm-rg/providers/Microsoft.Compute/virtualMachines/app01'
+              - cap_compute_azure_vnet_id.endswith('/virtualNetworks/vnet1')
+              - cap_compute_azure_vm_size == 'Standard_D4s_v5'
+              - "cap_compute_azure_image == {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '8-lvm-gen2', 'version': 'latest'}"
+              - "cap_compute_azure_disk_map == {'os': '/dev/disk/azure/root', 'data': '/dev/disk/azure/scsi1/lun0', 'logs': '/dev/disk/azure/scsi1/lun1'}"
+              - cap_compute_azure_data_disks | map(attribute='lun') | list == [0, 1]
+              - cap_compute_azure_data_disks[0].name == 'app01-data'
+            quiet: true
+
+    - name: Re-running prepare in the same play does not accumulate disks
+      vars:
+        cap_spec: "{{ good_spec }}"
+        cap_cfg: "{{ good_cfg }}"
+      block:
+        - name: Run prepare again
+          ansible.builtin.include_role:
+            name: cap_compute_azure
+            tasks_from: _prepare
+        - name: Still exactly two data disks
+          ansible.builtin.assert:
+            that: cap_compute_azure_data_disks | length == 2
+            quiet: true
+
+    - name: Every bad input is rejected
+      ansible.builtin.include_tasks: azure_prepare_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        label: "{{ item.name }}"

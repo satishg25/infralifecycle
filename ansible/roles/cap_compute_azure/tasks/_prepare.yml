@@ -1,0 +1,60 @@
+---
+# Pure logic: validates every reference and derives the Azure-specific values. No cloud calls,
+# so it can be unit-tested without a subscription (ansible/tests/azure_prepare.yml).
+# Fail closed: anything not recognised stops the run before a resource is touched.
+- name: Merge driver defaults with the profile configuration
+  ansible.builtin.set_fact:
+    cap_compute_azure_cfg: "{{ cap_compute_azure_defaults | combine(cap_cfg) }}"
+
+- name: Reject references and settings this driver does not understand
+  ansible.builtin.assert:
+    that:
+      - cap_spec.placement_ref is match('^[a-z0-9]+(:[1-3])?$')
+      - cap_spec.network_ref is match(cap_compute_azure_subnet_pattern)
+      - cap_spec.image_ref is match('^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$')
+      - (cap_spec.cpu ~ 'x' ~ cap_spec.memory_gb) in cap_compute_azure_cfg.vm_size_map
+      - cap_compute_azure_cfg.admin_username not in ['root', 'admin', 'administrator']
+      - cap_compute_azure_cfg.admin_ssh_public_key is match('^(ssh-(rsa|ed25519)|ecdsa-sha2-[a-z0-9]+) ')
+      - cap_spec.disks | selectattr('role', 'equalto', 'os') | list | length == 1
+    fail_msg: >-
+      Unsupported value for the azure compute driver. Expected: placement 'region' or 'region:zone';
+      network a full subnet resource id; image 'publisher:offer:sku:version' (gallery images are not
+      supported yet); a vm_size_map entry for '{{ cap_spec.cpu }}x{{ cap_spec.memory_gb }}'; a non-reserved
+      admin_username; an ssh public key; exactly one 'os' disk.
+    quiet: true
+
+- name: Derive Azure values from the spec
+  ansible.builtin.set_fact:
+    cap_compute_azure_location: "{{ cap_spec.placement_ref.split(':')[0] }}"
+    cap_compute_azure_zones: "{{ cap_spec.placement_ref.split(':')[1:] }}"
+    cap_compute_azure_vnet_id: "{{ cap_spec.network_ref.split('/subnets/')[0] }}"
+    cap_compute_azure_subnet: "{{ cap_spec.network_ref.split('/')[-1] }}"
+    cap_compute_azure_nic_name: "nic-{{ cap_spec.name }}"
+    cap_compute_azure_vm_size: "{{ cap_compute_azure_cfg.vm_size_map[cap_spec.cpu ~ 'x' ~ cap_spec.memory_gb] }}"
+    cap_compute_azure_image: "{{ dict(['publisher', 'offer', 'sku', 'version'] | zip(cap_spec.image_ref.split(':'))) }}"
+    cap_compute_azure_vm_id: >-
+      {{ ['', 'subscriptions', cap_compute_azure_cfg.subscription_id, 'resourceGroups', cap_compute_azure_cfg.resource_group,
+          'providers', 'Microsoft.Compute', 'virtualMachines', cap_spec.name] | join('/') }}
+
+# Data disks get LUNs 0..n in spec order. Azure exposes stable links for them at
+# /dev/disk/azure/scsi1/lunN (never /dev/sdX, whose order can change between boots).
+- name: Reset disk lists so repeated calls in one play do not accumulate
+  ansible.builtin.set_fact:
+    cap_compute_azure_data_disks: []
+    cap_compute_azure_disk_map: {os: /dev/disk/azure/root}
+
+- name: Build data disk definitions and the device map
+  ansible.builtin.set_fact:
+    cap_compute_azure_data_disks: >-
+      {{ cap_compute_azure_data_disks + [{
+           'lun': cap_compute_azure_lun,
+           'name': cap_spec.name ~ '-' ~ item.role,
+           'disk_size_gb': item.size_gb,
+           'managed_disk_type': cap_compute_azure_cfg.data_disk_type,
+           'caching': cap_compute_azure_cfg.data_disk_caching}] }}
+    cap_compute_azure_disk_map: >-
+      {{ cap_compute_azure_disk_map | combine({item.role: '/dev/disk/azure/scsi1/lun' ~ cap_compute_azure_lun}) }}
+  loop: "{{ cap_spec.disks | rejectattr('role', 'equalto', 'os') | list }}"
+  loop_control:
+    index_var: cap_compute_azure_lun
+    label: "{{ item.role }}"

@@ -1,0 +1,29 @@
+---
+# VMware lab profile. No secrets: vCenter credentials come from the environment
+# (VMWARE_HOST / VMWARE_USER / VMWARE_PASSWORD - an AAP vCenter credential injects these).
+profile:
+  contract: profile.v1
+  name: example-vmware-lab
+  policy:
+    allow_mock: false
+    allowed_environments: [lab]
+    mandatory_capabilities: []
+  access:
+    user: REPLACE-ssh-user   # the account baked into the template (key-based)
+    connection: ssh
+  baseline:
+    ntp_servers: [REPLACE-ntp.lab.example.invalid]
+    firewall_ports: []
+  middleware:
+    jboss:
+      install_source: rpm
+      bind_address: ""
+      firewall_ports: []
+  capabilities:
+    compute:
+      driver: vmware
+      config:
+        datacenter: REPLACE-datacenter
+        folder: /REPLACE-datacenter/vm/platform   # must exist; includes the datacenter
+        domain: lab.example.invalid               # fqdn suffix; DNS registration is a later capability
+        validate_certs: true                      # false only for a lab vCenter with a self-signed cert

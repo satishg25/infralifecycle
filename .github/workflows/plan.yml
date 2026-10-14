@@ -24,7 +24,7 @@ concurrency:
 jobs:
   plan:
     if: >-
-      startsWith(github.event.issue.title, '[platform] ') &&
+      startsWith(github.event.issue.title, '[platform]') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
     # Use a self-hosted runner (label in vars.PLAN_RUNNER) when the plan must reach a private lab VM.
     runs-on: ${{ vars.PLAN_RUNNER || 'ubuntu-latest' }}

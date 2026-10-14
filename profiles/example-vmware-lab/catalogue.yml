@@ -1,0 +1,19 @@
+---
+# Logical name -> VMware reference. PLACEHOLDERS: replace every REPLACE-* with your site values.
+catalogue:
+  sizing:
+    small:  {cpu: 2, memory_gb: 8}
+    medium: {cpu: 4, memory_gb: 16}
+    large:  {cpu: 8, memory_gb: 32}
+  images:
+    rhel8-std: "REPLACE-rhel8-template"          # name of the vCenter VM template (open-vm-tools + perl installed)
+  placement:
+    lab-a: "REPLACE-cluster/REPLACE-datastore"   # <cluster>/<datastore>
+  networks:
+    app-lab: "REPLACE-portgroup"                 # port group name (DHCP must be available on it)
+  defaults:
+    placement: lab-a
+    os_disk_gb: 64
+    data_disk_gb: 100
+    data_mount: /opt/app
+    data_fs: xfs

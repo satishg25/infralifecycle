@@ -1,0 +1,13 @@
+{
+  "contract": "request.v1",
+  "request_id": "REQ-0001",
+  "name": "sample-app01",
+  "environment": "lab",
+  "sizing": "medium",
+  "image": "rhel8-std",
+  "network_profile": "app-lab",
+  "owner": "platform-team",
+  "ttl_days": 7,
+  "middleware": "jboss",
+  "topology": "standalone"
+}

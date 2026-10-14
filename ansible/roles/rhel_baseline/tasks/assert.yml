@@ -23,8 +23,8 @@
 
 - name: Assert data volumes use stable device paths
   ansible.builtin.assert:
-    that: item.device is match('^/dev/disk/by-')
-    fail_msg: "Volume '{{ item.role }}' uses '{{ item.device }}' - only /dev/disk/by-* paths are allowed"
+    that: item.device is match('^/dev/disk/(by-|azure/)')
+    fail_msg: "Volume '{{ item.role }}' uses '{{ item.device }}' - only /dev/disk/by-* or /dev/disk/azure/* paths are allowed"
     quiet: true
   loop: "{{ rhel_baseline_data_volumes }}"
   loop_control:

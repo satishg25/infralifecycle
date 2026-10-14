@@ -1,0 +1,11 @@
+---
+# Driver defaults. The profile's capabilities.compute.config is merged over these.
+# Credentials are NEVER here or in the profile: VMWARE_HOST / VMWARE_USER / VMWARE_PASSWORD come
+# from the environment (an AAP "VMware vCenter" credential injects exactly these).
+cap_compute_vmware_defaults:
+  validate_certs: true         # fail closed on TLS; set false only for a lab with a self-signed vCenter
+  disk_type: thin              # thin | thick | eagerzeroedthick
+  scsi_controller: paravirtual # must match the controller the template uses
+  nic_type: vmxnet3
+  guest_customization: true    # sets hostname/domain via open-vm-tools; needs perl in the template
+  wait_for_ip_timeout: 300

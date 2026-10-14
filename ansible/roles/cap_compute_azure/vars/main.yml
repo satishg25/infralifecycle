@@ -1,0 +1,4 @@
+---
+# Fixed patterns (not user-tunable, hence vars/ rather than defaults/).
+cap_compute_azure_subnet_pattern: >-
+  ^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft[.]Network/virtualNetworks/[^/]+/subnets/[^/]+$

@@ -1,0 +1,70 @@
+---
+# Clones a RHEL template into a private DHCP-addressed VM. Credentials come from the environment
+# (VMWARE_HOST / VMWARE_USER / VMWARE_PASSWORD, e.g. an AAP credential). The template, folder,
+# cluster, datastore and port group must already exist: this driver creates none of them.
+- name: Prepare and validate VMware values
+  ansible.builtin.include_tasks: _prepare.yml
+
+- name: Clone the VM from the template
+  module_defaults:
+    group/community.vmware.vmware:
+      hostname: "{{ cap_compute_vmware_cfg.vcenter_hostname | default(omit) }}"
+      validate_certs: "{{ cap_compute_vmware_cfg.validate_certs | bool }}"
+  block:
+    - name: Ensure the virtual machine
+      community.vmware.vmware_guest:
+        datacenter: "{{ cap_compute_vmware_datacenter }}"
+        folder: "{{ cap_compute_vmware_folder }}"
+        cluster: "{{ cap_compute_vmware_cluster }}"
+        name: "{{ cap_spec.name }}"
+        template: "{{ cap_spec.image_ref }}"
+        state: poweredon
+        hardware:
+          num_cpus: "{{ cap_spec.cpu }}"
+          memory_mb: "{{ cap_spec.memory_gb * 1024 }}"
+          scsi: "{{ cap_compute_vmware_cfg.scsi_controller }}"
+        disk: "{{ cap_compute_vmware_disks }}"
+        networks:
+          - name: "{{ cap_spec.network_ref }}"
+            device_type: "{{ cap_compute_vmware_cfg.nic_type }}"
+            type: dhcp
+        customization: "{{ cap_compute_vmware_customization if cap_compute_vmware_cfg.guest_customization | bool else omit }}"
+        advanced_settings:
+          - {key: disk.EnableUUID, value: "TRUE"}
+        annotation: "{{ cap_compute_vmware_annotation }}"
+        wait_for_ip_address: true
+        wait_for_ip_address_timeout: "{{ cap_compute_vmware_cfg.wait_for_ip_timeout }}"
+      register: cap_compute_vmware_vm
+
+    - name: Read disk identifiers (stable by-id names come from the disk UUIDs)
+      community.vmware.vmware_guest_disk_info:
+        datacenter: "{{ cap_compute_vmware_datacenter }}"
+        folder: "{{ cap_compute_vmware_folder }}"
+        name: "{{ cap_spec.name }}"
+      register: cap_compute_vmware_diskinfo
+      when: not ansible_check_mode
+
+- name: Record the private IP address
+  ansible.builtin.set_fact:
+    cap_compute_vmware_ip: "{{ cap_compute_vmware_vm.instance.ipv4 | default('') | default('', true) }}"
+
+# In check mode a not-yet-cloned VM has no address: a plan shows a placeholder. Never accept an
+# empty address for a real run.
+- name: Require an address (a placeholder is allowed in check mode only)
+  ansible.builtin.assert:
+    that: cap_compute_vmware_ip is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$') or ansible_check_mode
+    fail_msg: "vCenter reported no IPv4 address for '{{ cap_spec.name }}' (are VMware tools running in the template?)"
+    quiet: true
+
+- name: Use a placeholder address in a plan
+  ansible.builtin.set_fact:
+    cap_compute_vmware_ip: 0.0.0.0
+  when: cap_compute_vmware_ip | length == 0
+
+- name: Build the disk map
+  ansible.builtin.include_tasks: _diskmap.yml
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _vmware_state: present

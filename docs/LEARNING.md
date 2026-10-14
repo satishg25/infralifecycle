@@ -26,6 +26,11 @@ Read the file, run it, break it on purpose. Each concept maps to something real 
 | 20 | Testing pure logic in isolation | `tests/ss_loopback.yml` | Add a failing case and watch it caught |
 | 21 | Check mode (`--check --diff`) and its limits; `check_mode: false`, `ansible_check_mode` | `roles/jboss/tasks/install_rpm.yml`, `main.yml` | Plan on a fresh host and see what is skipped |
 | 22 | Treating input as hostile (allow-list parse -> schema -> JSON file) | `tools/issue_to_request.py`, `tests/test_issue_parser.py` | Add a nasty test case |
+| 23 | `module_defaults` action groups; deriving values with Jinja (`split`, `zip`, `dict`, `join`) | `roles/cap_compute_azure/tasks/apply.yml`, `_prepare.yml` | Add a region:zone and print the derived facts |
+| 24 | Testing negative cases with `block/rescue` | `tests/azure_prepare.yml`, `azure_prepare_case.yml` | Add a case that should be rejected |
+| 25 | Normalising untrusted payloads from different systems into one contract | `tools/intake/common.py`, `servicenow.py`, `ado.py`, `custom.py` | Add a field to a FIELD_MAP and a rejection test |
+| 26 | Same contract, different engine (vCenter clone vs Azure); guarding destructive actions by ownership marker | `roles/cap_compute_vmware/tasks/revert.yml`, `apply.yml` | Read both revert.yml files side by side |
+| 27 | `failed_when` to treat one specific error as success; role-level vars for regexes | `roles/cap_compute_vmware/tasks/revert.yml`, `vars/main.yml` | Break the folder regex and watch the test catch it |
 
 ## Next concepts
 `become` deep-dive, `block/rescue/always`, Execution Environments (`ansible-builder`), Molecule with UBI-init, then AAP (project / job template / credentials / survey / workflow).

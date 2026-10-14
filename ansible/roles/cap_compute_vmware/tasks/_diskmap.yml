@@ -1,0 +1,29 @@
+---
+# UNVERIFIED on a real guest: with disk.EnableUUID=TRUE the kernel is expected to expose each disk
+# as /dev/disk/by-id/wwn-0x<disk uuid, lower case, no dashes>. Confirm on the first real VM
+# (ls -l /dev/disk/by-id) before trusting this.
+- name: Reset the disk map
+  ansible.builtin.set_fact:
+    cap_compute_vmware_disk_map: {}
+
+- name: Build role -> device map from the disk UUIDs
+  ansible.builtin.set_fact:
+    cap_compute_vmware_disk_map: >-
+      {{ cap_compute_vmware_disk_map | combine({item.key: '/dev/disk/by-id/wwn-0x'
+         ~ ((cap_compute_vmware_diskinfo.guest_disk_info.values() | selectattr('controller_key', 'equalto', 1000)
+             | selectattr('unit_number', 'equalto', item.value) | selectattr('backing_uuid') | first).backing_uuid
+            | replace('-', '') | lower)}) }}
+  loop: "{{ cap_compute_vmware_disk_units | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: not ansible_check_mode
+
+# A plan has no disks yet, so show well-formed placeholders (never used by a real run).
+- name: Placeholder device map for a plan
+  ansible.builtin.set_fact:
+    cap_compute_vmware_disk_map: >-
+      {{ cap_compute_vmware_disk_map | combine({item.key: '/dev/disk/by-id/wwn-0x' ~ ('0' * 32)}) }}
+  loop: "{{ cap_compute_vmware_disk_units | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: ansible_check_mode

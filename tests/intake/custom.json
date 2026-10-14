@@ -1,0 +1,1 @@
+{"reference": "APP-000123", "name": "sample-app01", "environment": "lab", "sizing": "large", "image": "rhel8-std", "network_profile": "app-lab", "middleware": "jboss", "node_count": 1}

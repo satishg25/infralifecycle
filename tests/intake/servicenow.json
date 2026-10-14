@@ -1,0 +1,1 @@
+{"number": "RITM0012345", "variables": {"u_app_name": "sample-app01", "u_environment": {"value": "Lab", "display_value": "Lab"}, "u_size": "Medium", "u_os_image": "RHEL 8", "u_network": "app-lab", "u_middleware": "JBoss EAP", "u_data_disk_gb": "200", "u_owner": "platform-team", "u_ttl_days": "7", "u_change": "CHG0034567"}}

@@ -1,0 +1,8 @@
+---
+# Example inventory. In AAP this comes from their inventory source instead.
+all:
+  children:
+    middleware_nodes:
+      hosts:
+        vm01.example.invalid:
+          ansible_user: automation   # non-root with sudo; the key comes from AAP / ssh-agent

@@ -1,0 +1,93 @@
+---
+# Thin entry point for a calling application (custom app / AAP job template): FLAT extra variables
+# in, no profile, no request file, no framework dependency. Assumes the VM already exists and is
+# in the inventory (their VM role or job runs first).
+#
+#   ansible-playbook playbooks/thin/jboss_standalone.yml -i <inventory> -e @examples/baloise/jboss_standalone.vars.yml
+#   (check mode / preview)   ... --check --diff
+#
+# Contract - everything is optional unless marked:
+#   target_hosts                  inventory group or host pattern            (default: middleware_nodes)
+#   run_baseline                  also apply rhel_baseline                   (default: false)
+#   run_validation                run read-only validation + evidence        (default: true)
+#   rhel_baseline_ntp_servers     REQUIRED when run_baseline is true
+#   rhel_baseline_data_volumes    list of {role, device, vg, lv, mount, fs}; device must be /dev/disk/by-*
+#   jboss_install_source          rpm | archive                              (default: rpm)
+#   jboss_bind_address            empty (loopback) or an IPv4 address
+#   jboss_firewall_ports          e.g. ["8080/tcp"]                          (default: none)
+#   (any other jboss_* / rhel_baseline_* / validation_* role variable may also be passed)
+- name: Validate the inputs before touching any host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Check target_hosts is a plain inventory pattern
+      ansible.builtin.assert:
+        that: (target_hosts | default('middleware_nodes')) is match('^[A-Za-z0-9_.:*,&!-]+$')
+        fail_msg: "target_hosts must be a plain inventory group/host pattern (letters, digits and _ . : * , & ! -), got '{{ target_hosts | default('') }}'"
+        quiet: true
+
+    - name: Check the boolean switches
+      ansible.builtin.assert:
+        that:
+          - (run_baseline | default(false)) | string | lower in ['true', 'false']
+          - (run_validation | default(true)) | string | lower in ['true', 'false']
+        fail_msg: "run_baseline and run_validation must be true or false"
+        quiet: true
+
+    - name: Check the baseline has the values it cannot default
+      ansible.builtin.assert:
+        that: not (run_baseline | default(false) | bool) or (rhel_baseline_ntp_servers | default([])) | length > 0
+        fail_msg: "run_baseline is true, so rhel_baseline_ntp_servers is required (a non-empty list)"
+        quiet: true
+
+    - name: Check the install source
+      ansible.builtin.assert:
+        that: (jboss_install_source | default('rpm')) in ['rpm', 'archive']
+        fail_msg: "jboss_install_source must be rpm or archive, got '{{ jboss_install_source | default('') }}'"
+        quiet: true
+
+- name: JBoss EAP 8 standalone
+  hosts: "{{ target_hosts | default('middleware_nodes') }}"
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Apply the OS baseline (only when asked - the VM role may already do this)
+      ansible.builtin.include_role:
+        name: rhel_baseline
+      when: run_baseline | default(false) | bool
+      tags: [baseline]
+
+    - name: Install and configure JBoss EAP
+      ansible.builtin.include_role:
+        name: jboss
+      tags: [jboss]
+
+    - name: Build the expected mount list from the data volumes
+      ansible.builtin.set_fact:
+        thin_expected_mounts: "{{ (thin_expected_mounts | default([])) + [{'path': item.mount, 'fstype': item.fs}] }}"
+      loop: "{{ rhel_baseline_data_volumes | default([]) }}"
+      loop_control:
+        label: "{{ item.mount }}"
+      when: run_validation | default(true) | bool
+      tags: [validate]
+
+    - name: Read-only OS validation and evidence report
+      ansible.builtin.include_role:
+        name: validation
+      vars:
+        validation_expected_mounts: "{{ thin_expected_mounts | default([]) }}"
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]
+
+    - name: Read-only JBoss validation
+      ansible.builtin.include_role:
+        name: jboss
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]

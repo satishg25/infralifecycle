@@ -1,0 +1,65 @@
+---
+# Pure logic: validates every reference and derives VMware values. No vCenter calls, so it is
+# unit-tested without a vCenter (ansible/tests/vmware_prepare.yml). Fail closed.
+- name: Merge driver defaults with the profile configuration
+  ansible.builtin.set_fact:
+    cap_compute_vmware_cfg: "{{ cap_compute_vmware_defaults | combine(cap_cfg) }}"
+
+- name: Reject references and settings this driver does not understand
+  ansible.builtin.assert:
+    that:
+      - cap_spec.placement_ref is match(cap_compute_vmware_placement_pattern)
+      - cap_spec.network_ref is match(cap_compute_vmware_network_pattern)
+      - cap_spec.image_ref is match(cap_compute_vmware_ref_pattern)
+      - cap_compute_vmware_cfg.datacenter is match(cap_compute_vmware_ref_pattern)
+      - cap_compute_vmware_cfg.folder is match(cap_compute_vmware_path_pattern)
+      - cap_compute_vmware_cfg.domain is match('^[a-z0-9.-]+$')
+      - cap_compute_vmware_cfg.disk_type in ['thin', 'thick', 'eagerzeroedthick']
+      - cap_compute_vmware_cfg.scsi_controller in ['paravirtual', 'lsilogicsas']
+      - cap_spec.disks | selectattr('role', 'equalto', 'os') | list | length == 1
+      - (cap_spec.disks | first).role == 'os'
+      - cap_spec.disks | length <= cap_compute_vmware_max_disks - 1
+    fail_msg: >-
+      Unsupported value for the vmware compute driver. Expected: placement 'cluster/datastore';
+      network a port group name; image a vCenter template name; config datacenter and folder
+      (folder includes the datacenter, e.g. /DC1/vm/platform); exactly one 'os' disk, listed first.
+    quiet: true
+
+- name: Derive VMware values from the spec
+  ansible.builtin.set_fact:
+    cap_compute_vmware_cluster: "{{ cap_spec.placement_ref.split('/')[0] }}"
+    cap_compute_vmware_datastore: "{{ cap_spec.placement_ref.split('/')[1] }}"
+    cap_compute_vmware_folder: "{{ cap_compute_vmware_cfg.folder }}"
+    cap_compute_vmware_datacenter: "{{ cap_compute_vmware_cfg.datacenter }}"
+    cap_compute_vmware_fqdn: "{{ cap_spec.name }}.{{ cap_compute_vmware_cfg.domain }}"
+    cap_compute_vmware_id: "vmware:{{ cap_compute_vmware_cfg.folder | regex_replace('^/', '') }}/{{ cap_spec.name }}"
+    cap_compute_vmware_customization:
+      hostname: "{{ cap_spec.name }}"
+      domain: "{{ cap_compute_vmware_cfg.domain }}"
+    cap_compute_vmware_annotation: >-
+      {{ cap_spec.tags | dictsort | map('join', '=') | join(' ') }}
+    cap_compute_vmware_annotation_tokens: >-
+      {{ cap_spec.tags | dictsort | map('join', '=') | list }}
+
+# Disk i of the spec sits on SCSI unit i, skipping the reserved unit 7.
+- name: Reset disk lists so repeated calls in one play do not accumulate
+  ansible.builtin.set_fact:
+    cap_compute_vmware_disks: []
+    cap_compute_vmware_disk_units: {}
+
+- name: Build the disk definitions and the role -> SCSI unit map
+  ansible.builtin.set_fact:
+    cap_compute_vmware_disks: >-
+      {{ cap_compute_vmware_disks + [{
+           'size_gb': item.size_gb,
+           'type': cap_compute_vmware_cfg.disk_type,
+           'datastore': cap_compute_vmware_datastore,
+           'controller_type': cap_compute_vmware_cfg.scsi_controller,
+           'controller_number': 0,
+           'unit_number': (cap_compute_vmware_idx + 1) if cap_compute_vmware_idx >= 7 else cap_compute_vmware_idx}] }}
+    cap_compute_vmware_disk_units: >-
+      {{ cap_compute_vmware_disk_units | combine({item.role: (cap_compute_vmware_idx + 1) if cap_compute_vmware_idx >= 7 else cap_compute_vmware_idx}) }}
+  loop: "{{ cap_spec.disks }}"
+  loop_control:
+    index_var: cap_compute_vmware_idx
+    label: "{{ item.role }}"

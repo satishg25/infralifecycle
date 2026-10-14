@@ -1,0 +1,44 @@
+---
+# Blast-radius guard: only a VM that carries OUR tags and THIS request id may be deleted. A VM
+# with the same name but different ownership is never touched.
+- name: Prepare and validate Azure values
+  ansible.builtin.include_tasks: _prepare.yml
+
+- name: Remove the VM, its disks and its network interface
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ cap_compute_azure_cfg.subscription_id }}"
+      auth_source: "{{ cap_compute_azure_cfg.auth_source }}"
+  block:
+    - name: Look up the VM
+      azure.azcollection.azure_rm_virtualmachine_info:
+        resource_group: "{{ cap_compute_azure_cfg.resource_group }}"
+        name: "{{ cap_spec.name }}"
+      register: cap_compute_azure_vm
+
+    - name: Refuse to delete a VM this platform does not own for this request
+      ansible.builtin.assert:
+        that:
+          - cap_compute_azure_vm.vms[0].tags.managed_by | default('') == 'platform-kit'
+          - cap_compute_azure_vm.vms[0].tags.request_id | default('') == cap_spec.tags.request_id
+        fail_msg: >-
+          VM '{{ cap_spec.name }}' exists but is not tagged managed_by=platform-kit with
+          request_id={{ cap_spec.tags.request_id }} - refusing to delete it
+        quiet: true
+      when: cap_compute_azure_vm.vms | length > 0
+
+    - name: Delete the VM with its OS/data disks and network interface
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ cap_compute_azure_cfg.resource_group }}"
+        name: "{{ cap_spec.name }}"
+        state: absent
+        remove_on_absent:
+          - network_interfaces
+          - virtual_storage
+      when: cap_compute_azure_vm.vms | length > 0
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _azure_state: absent
+    cap_compute_azure_ip: 0.0.0.0

@@ -28,7 +28,8 @@ The `compute` capability has interchangeable drivers behind the same contract:
 |---|---|---|
 | `mock` | Ansible | CI, learning, no infra (refused unless `policy.allow_mock: true`) |
 | `existing` | Ansible | Bring-your-own-host: run baseline/workload roles against any RHEL 8 VM you already have |
-| `azure`, `vmware` (planned) | Ansible modules | Datacentre / lab VMs |
+| `azure` | Ansible (`azure.azcollection`) | Private-IP-only RHEL VM in an Azure lab. **Written, not yet run against Azure** - see below |
+| `vmware` | Ansible (`community.vmware`) | Clone a RHEL template in vCenter. **Written, not yet run against vCenter** - see below |
 | `terraform` (planned) | `cloud.terraform` wrapping a module whose variables = `machine_spec`, outputs = `machine_result` | Cloud, where state/destroy matter |
 
 Request intake (issue form / portal) and orchestration (Actions → AAP) stay engine-neutral and call the same playbooks.
@@ -69,6 +70,33 @@ Evidence lands in `ansible/.state/reports/<host>.json`. Use `--tags baseline_sto
 
 **What the plan is and is not.** It is a best-effort Ansible *check mode* preview, not `terraform plan`: it shows the resolved request, every gate (policy, catalogue, OS, contract) and the changes modules can predict. Steps that need earlier changes to exist (starting an uninstalled service, the JBoss CLI, validation) are skipped in a plan and run on apply. Nothing is changed. **Apply is not built yet** - it will be a separate workflow with an approval gate (approver != requester, payload hash frozen at approval).
 
+## Azure compute driver (`cap_compute_azure`) - written, NOT yet run against Azure
+Same contract as every compute driver, so all four use cases (JBoss/Tomcat, standalone/HA) reuse it unchanged.
+- **Profile:** `profiles/example-azure-lab/` (placeholders only: subscription, resource group, subnet id, public key, VM size map). Bind it with `capabilities.compute.driver: azure`.
+- **Secure defaults:** private IP only (no public IP, no per-NIC NSG - filter on the subnet), SSH key only (no passwords), encryption at host, managed boot diagnostics, no managed identity unless requested, data disks on stable `/dev/disk/azure/scsi1/lunN` paths.
+- **Fail closed:** unknown region/zone, subnet id, image, VM size, reserved admin name, non-public-key or missing `os` disk all stop the run before any resource is touched.
+- **Revert guard:** deletes only a VM tagged `managed_by=platform-kit` with the same `request_id`.
+- **Scope limits:** resource group must already exist (never created); image is `publisher:offer:sku:version` only (gallery/golden images later); DNS registration is a later capability; in a plan the IP shows as `0.0.0.0` for a VM that does not exist yet, so plan with `provision.yml`, not `site.yml`.
+- **Auth:** from the environment (OIDC / managed identity / `az login`); only `subscription_id` and `auth_source` are in the profile. The collection needs its Python SDK (`pip install -r <collection>/requirements.txt`) - put it in the Execution Environment.
+- **Checked here:** lint (module parameters validated against `azure.azcollection` 3.21.0 docs), the pure derivation/validation logic (`ansible/tests/azure_prepare.yml`, 7 rejection cases). **Not checked:** any call to Azure, encryption-at-host registration, zone/size availability, idempotent re-apply.
+- **Terraform later:** swap `driver: azure` for a Terraform-backed driver returning the same `machine_result.v1`; nothing downstream changes.
+
+## Intake adapters (ServiceNow, ADO, custom app) -> `request.v1`
+`tools/intake_adapter.py <servicenow|ado|custom> <payload.json> [--out request.json]` converts a source payload into the same `request.v1` the GitHub form produces. Each adapter in `tools/intake/` only extracts fields; `common.py` does the strict part (allow-list, whole-number check, label->logical value maps, schema validation, request id derived from the source reference, e.g. `RITM0012345` -> `RITM-0012345`). The source can never set `contract`, `request_id` or `topology`.
+- **Edit per customer:** `FIELD_MAP` in each adapter (variable / field names) and `VALUE_MAPS` in `common.py` (display labels -> logical values).
+- **Payload shapes are assumptions** (ServiceNow `{number, variables}`, ADO work item `{id, fields}`, custom `{reference, ...}`): compare against a real payload before trusting them.
+- **Checked here:** fixtures in `tests/intake/`, 14 tests (3 good, 11 rejection cases incl. injection string, unknown label, bad number, privileged fields), and ServiceNow output driven through the mock provision/revert.
+
+## VMware compute driver (`cap_compute_vmware`) - written, NOT yet run against vCenter
+- **Profile:** `profiles/example-vmware-lab/` (placeholders only). The datacentre provider is an ASSUMPTION (vSphere); if it is not vSphere, only this role changes.
+- **Credentials:** `VMWARE_HOST` / `VMWARE_USER` / `VMWARE_PASSWORD` from the environment (an AAP vCenter credential injects these). TLS verification is on by default.
+- **Mapping:** `image` = template name, `placement` = `cluster/datastore`, `network` = port group (DHCP). The datacenter, folder, template, cluster, datastore and port group must pre-exist.
+- **Ownership guard:** the VM annotation carries `managed_by=platform-kit request_id=...`; `revert` deletes only a VM whose annotation matches this request.
+- **Checked here:** lint, syntax-check, module parameters against `community.vmware` 7.0.0 source, derivation/validation logic and disk-map logic with synthetic output (`ansible/tests/vmware_prepare.yml`). **Not checked:** any vCenter call; guest customisation; `wait_for_ip`; the `/dev/disk/by-id/wwn-0x<uuid>` disk naming (confirm on the first VM); revert on a missing VM (relies on the module error text containing "non-existing"); Galaxy availability of the pinned versions.
+
+## Thin layer for a customer app (Baloise)
+`ansible/playbooks/thin/jboss_standalone.yml` takes flat extra variables and assumes the VM exists. `python3 tools/export_thin.py <dir>` copies the roles plus the playbook without any framework code (fails if framework words leak). See `docs/BALOISE-HANDOVER.md`.
+
 ## Add a driver
 1. Create `roles/cap_<capability>_<driver>/` with `tasks/{apply,validate,revert}.yml`.
 2. Declare inputs in `meta/argument_specs.yml` (one block per entry point).
@@ -97,6 +125,6 @@ Copy `profiles/example-lab/`, set `policy.allow_mock: false`, bind real drivers,
 1. ✅ Contracts, dispatcher, mock compute, profile, CI
 2. ✅ (code complete, awaiting RHEL test) `rhel_baseline` + `validation`, `existing` driver, `add_host` inventory
 3. ✅ (code complete, awaiting RHEL + Satellite test) `jboss` standalone via RPM; next `tomcat`, then the `archive` source, TLS role
-4. Real compute driver(s); `terraform` driver
+4. ✅ (written, untested) `azure` and `vmware` compute drivers, intake adapters; next `terraform` driver
 5. Enterprise capability drivers with apply/revert pairs (ipam, dns, identity, config_mgmt, cmdb, backup, agents)
 6. HA + `lb` capability; AAP launch adapter; intake workflow

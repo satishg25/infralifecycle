@@ -1,8 +1,18 @@
 ---
 # Pin every collection. Install from your approved source (private automation hub in a customer
-# environment). The framework's own roles only need these two beyond ansible-core.
+# environment). The baseline roles need the first two; the azure driver needs azure.azcollection, the vmware driver community.vmware (plus its Python
+# SDK requirements - bake them into the Execution Environment, see the README).
 collections:
   - name: ansible.posix
     version: "==2.2.2"
   - name: community.general
     version: "==13.5.0"
+  - name: azure.azcollection
+    version: "==3.21.0"
+  # VMware driver: community.vmware 7.x depends on vmware.vmware >=2.10; both need pyvmomi (+ vmware-vcenter SDK
+  # as the modules require) in the Execution Environment. Galaxy availability of these exact versions is unconfirmed
+  # (verified only as GitHub tags) - check your automation hub.
+  - name: community.vmware
+    version: "==7.0.0"
+  - name: vmware.vmware
+    version: "==2.10.0"

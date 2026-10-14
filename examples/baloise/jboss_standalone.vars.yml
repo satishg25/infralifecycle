@@ -1,0 +1,14 @@
+---
+# Example flat variables a calling app would send. Placeholders only - no secrets belong here.
+target_hosts: middleware_nodes
+run_baseline: false          # set true only if their VM role does not already apply a baseline
+run_validation: true
+
+jboss_install_source: rpm
+jboss_bind_address: ""       # empty = loopback only; set to the host IPv4 to serve on the network
+jboss_firewall_ports: []     # e.g. ["8080/tcp"]
+
+# Only needed when run_baseline: true
+# rhel_baseline_ntp_servers: [ntp.example.invalid]
+# rhel_baseline_data_volumes:
+#   - {role: data, device: /dev/disk/by-id/REPLACE, vg: vg_data, lv: lv_data, mount: /opt/app, fs: xfs}

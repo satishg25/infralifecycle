@@ -1,0 +1,39 @@
+---
+argument_specs:
+  apply:
+    short_description: Create (idempotently) a private-IP RHEL VM in VMware (cloned from a vCenter template) and return machine_result.v1
+    options: &opts
+      cap_spec:
+        type: dict
+        required: true
+        options:
+          contract: {type: str, required: true, choices: [machine_spec.v1]}
+          name: {type: str, required: true}
+          cpu: {type: int, required: true}
+          memory_gb: {type: int, required: true}
+          image_ref: {type: str, required: true}
+          placement_ref: {type: str, required: true}
+          network_ref: {type: str, required: true}
+          disks: {type: list, elements: dict, required: true}
+          tags: {type: dict, required: true}
+          native: {type: dict, required: false}
+      cap_cfg:
+        type: dict
+        required: true
+        options:
+          datacenter: {type: str, required: true}
+          folder: {type: str, required: true}
+          domain: {type: str, required: true}
+          vcenter_hostname: {type: str, required: false}
+          validate_certs: {type: bool, required: false}
+          disk_type: {type: str, required: false, choices: [thin, thick, eagerzeroedthick]}
+          scsi_controller: {type: str, required: false, choices: [paravirtual, lsilogicsas]}
+          nic_type: {type: str, required: false}
+          guest_customization: {type: bool, required: false}
+          wait_for_ip_timeout: {type: int, required: false}
+  validate:
+    short_description: Confirm the VM exists, is powered on and is owned by this platform
+    options: *opts
+  revert:
+    short_description: Delete the VM and its disks - only when tagged as owned by this request
+    options: *opts

@@ -1,0 +1,106 @@
+---
+# Logic test for the vmware driver's validation and derivation. No subscription or collection calls:
+# only roles/cap_compute_vmware/tasks/_prepare.yml runs. Good input must derive correct values;
+# each bad input must be rejected (fail closed).
+- name: VMware driver - prepare logic
+  hosts: localhost
+  gather_facts: false
+  vars:
+    good_spec:
+      contract: machine_spec.v1
+      name: app01
+      cpu: 4
+      memory_gb: 16
+      image_ref: "rhel8-tmpl"
+      placement_ref: "cl01/ds01"
+      network_ref: "PG-app-lab"
+      disks:
+        - {role: os, size_gb: 64}
+        - {role: data, size_gb: 100, mount: /opt/app, fs: xfs}
+        - {role: logs, size_gb: 50, mount: /var/log/app, fs: xfs}
+      tags: {request_id: REQ-0001, managed_by: platform-kit}
+    good_cfg:
+      datacenter: DC1
+      folder: /DC1/vm/platform
+      domain: lab.example.invalid
+    many_disks: "{{ [{'role': 'os', 'size_gb': 1}] + (range(15) | map('string') | map('community.general.dict_kv', 'role') | list) }}"
+    cases:
+      - {name: bad template name, spec: {image_ref: "tmpl; reboot"}}
+      - {name: placement without datastore, spec: {placement_ref: "cl01"}}
+      - {name: bad port group, spec: {network_ref: "pg$(id)"}}
+      - {name: two os disks, spec: {disks: [{role: os, size_gb: 1}, {role: os, size_gb: 1}]}}
+      - {name: os disk not first, spec: {disks: [{role: data, size_gb: 1}, {role: os, size_gb: 1}]}}
+      - {name: too many disks, spec: {disks: "{{ many_disks }}"}}
+      - {name: no datacenter, cfg: {datacenter: "bad dc"}}
+      - {name: folder traversal, cfg: {folder: "/DC1/../etc"}}
+      - {name: bad disk type, cfg: {disk_type: "weird"}}
+  tasks:
+    - name: Good input derives the expected VMware values
+      vars:
+        cap_spec: "{{ good_spec }}"
+        cap_cfg: "{{ good_cfg }}"
+      block:
+        - name: Run prepare
+          ansible.builtin.include_role:
+            name: cap_compute_vmware
+            tasks_from: _prepare
+        - name: Check derived values
+          ansible.builtin.assert:
+            that:
+              - cap_compute_vmware_cluster == 'cl01'
+              - cap_compute_vmware_datastore == 'ds01'
+              - cap_compute_vmware_fqdn == 'app01.lab.example.invalid'
+              - "cap_compute_vmware_id == 'vmware:DC1/vm/platform/app01'"
+              - "cap_compute_vmware_annotation == 'managed_by=platform-kit request_id=REQ-0001'"
+              - "cap_compute_vmware_disk_units == {'os': 0, 'data': 1, 'logs': 2}"
+              - cap_compute_vmware_disks | map(attribute='unit_number') | list == [0, 1, 2]
+              - cap_compute_vmware_disks[1].datastore == 'ds01'
+              - cap_compute_vmware_cfg.disk_type == 'thin'
+            quiet: true
+
+    - name: Re-running prepare in the same play does not accumulate disks
+      vars:
+        cap_spec: "{{ good_spec }}"
+        cap_cfg: "{{ good_cfg }}"
+      block:
+        - name: Run prepare again
+          ansible.builtin.include_role:
+            name: cap_compute_vmware
+            tasks_from: _prepare
+        - name: Still exactly three disks
+          ansible.builtin.assert:
+            that: cap_compute_vmware_disks | length == 3
+            quiet: true
+
+    - name: Disk map is built from disk UUIDs (synthetic vCenter output; ignores other controllers)
+      vars:
+        cap_spec: "{{ good_spec }}"
+        cap_cfg: "{{ good_cfg }}"
+        cap_compute_vmware_diskinfo:
+          guest_disk_info:
+            "0": {controller_key: 1000, unit_number: 0, backing_uuid: "6000C294-AAAA-0000-1111-222233334444"}
+            "1": {controller_key: 1000, unit_number: 1, backing_uuid: "6000C294-BBBB-0000-1111-222233334444"}
+            "2": {controller_key: 1000, unit_number: 2, backing_uuid: "6000C294-CCCC-0000-1111-222233334444"}
+            "3": {controller_key: 15000, unit_number: 0, backing_uuid: "6000C294-DDDD-0000-1111-222233334444"}
+      block:
+        - name: Run prepare
+          ansible.builtin.include_role:
+            name: cap_compute_vmware
+            tasks_from: _prepare
+        - name: Build the map
+          ansible.builtin.include_role:
+            name: cap_compute_vmware
+            tasks_from: _diskmap
+        - name: Check the map
+          ansible.builtin.assert:
+            that:
+              - "cap_compute_vmware_disk_map.os == '/dev/disk/by-id/wwn-0x6000c294aaaa00001111222233334444'"
+              - cap_compute_vmware_disk_map.data.endswith('bbbb00001111222233334444')
+              - cap_compute_vmware_disk_map.logs.endswith('cccc00001111222233334444')
+            quiet: true
+
+    - name: Every bad input is rejected
+      ansible.builtin.include_tasks: vmware_prepare_case.yml
+      loop: "{{ cases }}"
+      loop_control:
+        label: "{{ item.name }}"

@@ -1,0 +1,45 @@
+---
+# Read-only: confirms the VM exists, is powered on, has an address and carries our ownership tags.
+- name: Prepare and validate VMware values
+  ansible.builtin.include_tasks: _prepare.yml
+
+- name: Read the VM
+  module_defaults:
+    group/community.vmware.vmware:
+      hostname: "{{ cap_compute_vmware_cfg.vcenter_hostname | default(omit) }}"
+      validate_certs: "{{ cap_compute_vmware_cfg.validate_certs | bool }}"
+  block:
+    - name: Look up the VM
+      community.vmware.vmware_guest_info:
+        datacenter: "{{ cap_compute_vmware_datacenter }}"
+        folder: "{{ cap_compute_vmware_folder }}"
+        name: "{{ cap_spec.name }}"
+      register: cap_compute_vmware_vm
+
+    - name: Read disk identifiers
+      community.vmware.vmware_guest_disk_info:
+        datacenter: "{{ cap_compute_vmware_datacenter }}"
+        folder: "{{ cap_compute_vmware_folder }}"
+        name: "{{ cap_spec.name }}"
+      register: cap_compute_vmware_diskinfo
+
+- name: Require a powered-on VM owned by this platform
+  ansible.builtin.assert:
+    that:
+      - cap_compute_vmware_vm.instance.hw_power_status == 'poweredOn'
+      - "'managed_by=platform-kit' in cap_compute_vmware_vm.instance.annotation.split()"
+      - cap_compute_vmware_vm.instance.ipv4 is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+    fail_msg: "VM '{{ cap_spec.name }}' is not powered on, has no IPv4 address, or is not marked managed_by=platform-kit"
+    quiet: true
+
+- name: Record the private IP address
+  ansible.builtin.set_fact:
+    cap_compute_vmware_ip: "{{ cap_compute_vmware_vm.instance.ipv4 }}"
+
+- name: Build the disk map
+  ansible.builtin.include_tasks: _diskmap.yml
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _vmware_state: present

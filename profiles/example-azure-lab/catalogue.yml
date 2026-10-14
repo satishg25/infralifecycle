@@ -1,0 +1,19 @@
+---
+# Logical name -> Azure reference. PLACEHOLDERS: replace every REPLACE-* and confirm the image SKU.
+catalogue:
+  sizing:
+    small:  {cpu: 2, memory_gb: 8}
+    medium: {cpu: 4, memory_gb: 16}
+    large:  {cpu: 8, memory_gb: 32}
+  images:
+    rhel8-std: "RedHat:RHEL:8-lvm-gen2:latest"   # publisher:offer:sku:version - confirm the approved SKU/version
+  placement:
+    lab-a: "uksouth"                              # region, or region:zone (e.g. uksouth:1)
+  networks:
+    app-lab: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/REPLACE-network-rg/providers/Microsoft.Network/virtualNetworks/REPLACE-vnet/subnets/REPLACE-subnet"
+  defaults:
+    placement: lab-a
+    os_disk_gb: 64
+    data_disk_gb: 100
+    data_mount: /opt/app
+    data_fs: xfs

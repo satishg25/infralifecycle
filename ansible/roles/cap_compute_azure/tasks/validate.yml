@@ -1,0 +1,42 @@
+---
+# Read-only: confirms the VM exists, is running and carries our ownership tags.
+- name: Prepare and validate Azure values
+  ansible.builtin.include_tasks: _prepare.yml
+
+- name: Read the VM and its network interface
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ cap_compute_azure_cfg.subscription_id }}"
+      auth_source: "{{ cap_compute_azure_cfg.auth_source }}"
+  block:
+    - name: Look up the VM
+      azure.azcollection.azure_rm_virtualmachine_info:
+        resource_group: "{{ cap_compute_azure_cfg.resource_group }}"
+        name: "{{ cap_spec.name }}"
+      register: cap_compute_azure_vm
+
+    - name: Look up the network interface
+      azure.azcollection.azure_rm_networkinterface_info:
+        resource_group: "{{ cap_compute_azure_cfg.resource_group }}"
+        name: "{{ cap_compute_azure_nic_name }}"
+      register: cap_compute_azure_nic_info
+
+- name: Require a running VM owned by this platform
+  ansible.builtin.assert:
+    that:
+      - cap_compute_azure_vm.vms | length == 1
+      - cap_compute_azure_vm.vms[0].power_state | default('') == 'running'
+      - cap_compute_azure_vm.vms[0].tags.managed_by | default('') == 'platform-kit'
+    fail_msg: "VM '{{ cap_spec.name }}' is missing, not running, or not tagged managed_by=platform-kit"
+    quiet: true
+
+- name: Record the private IP address
+  ansible.builtin.set_fact:
+    cap_compute_azure_ip: >-
+      {{ cap_compute_azure_nic_info.networkinterfaces[0].ip_configurations
+         | map(attribute='private_ip_address') | select | list | first }}
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _azure_state: present

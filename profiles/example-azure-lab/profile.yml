@@ -1,0 +1,36 @@
+---
+# Azure lab profile. No secrets: authentication comes from the environment (OIDC / managed
+# identity / az login). The SSH value below is a PUBLIC key.
+profile:
+  contract: profile.v1
+  name: example-azure-lab
+  policy:
+    allow_mock: false
+    allowed_environments: [lab]
+    mandatory_capabilities: []
+  access:
+    user: azureuser          # must equal capabilities.compute.config.admin_username
+    connection: ssh
+  baseline:
+    ntp_servers: [REPLACE-ntp.lab.example.invalid]
+    firewall_ports: []
+  middleware:
+    jboss:
+      install_source: rpm
+      bind_address: ""
+      firewall_ports: []
+  capabilities:
+    compute:
+      driver: azure
+      config:
+        subscription_id: "00000000-0000-0000-0000-000000000000"
+        auth_source: auto
+        resource_group: REPLACE-vm-rg          # must already exist
+        domain: lab.example.invalid            # fqdn suffix; DNS registration is a later capability
+        admin_username: azureuser
+        admin_ssh_public_key: "ssh-ed25519 AAAAREPLACE-with-your-public-key lab"
+        vm_size_map:                           # "<cpu>x<memory_gb>" -> VM size; confirm availability in your region
+          "2x8": Standard_D2s_v5
+          "4x16": Standard_D4s_v5
+          "8x32": Standard_D8s_v5
+        encryption_at_host: true               # set false only if the feature is not registered

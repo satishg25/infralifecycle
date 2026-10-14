@@ -1,0 +1,95 @@
+---
+# Creates (idempotently) a private-IP-only RHEL VM. Authentication comes from the environment
+# (OIDC / managed identity / az login), never from the profile; only subscription_id and
+# auth_source are passed here. The resource group must already exist: creating resource groups
+# is deliberately out of scope so this driver needs no subscription-level rights.
+- name: Prepare and validate Azure values
+  ansible.builtin.include_tasks: _prepare.yml
+
+- name: Create the VM and its network interface
+  module_defaults:
+    group/azure.azcollection.all:
+      subscription_id: "{{ cap_compute_azure_cfg.subscription_id }}"
+      auth_source: "{{ cap_compute_azure_cfg.auth_source }}"
+  block:
+    - name: Look up the target resource group
+      azure.azcollection.azure_rm_resourcegroup_info:
+        name: "{{ cap_compute_azure_cfg.resource_group }}"
+      register: cap_compute_azure_rg
+
+    - name: Require the resource group to exist
+      ansible.builtin.assert:
+        that: cap_compute_azure_rg.resourcegroups | length == 1
+        fail_msg: "Resource group '{{ cap_compute_azure_cfg.resource_group }}' not found - create it first (this driver never creates one)"
+        quiet: true
+
+    # No public IP (no public_ip_address_name) and no per-NIC NSG: filtering belongs on the subnet
+    # in a landing zone. This deviates from the module default, which creates both.
+    - name: Ensure the network interface (private IP only)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ cap_compute_azure_cfg.resource_group }}"
+        name: "{{ cap_compute_azure_nic_name }}"
+        location: "{{ cap_compute_azure_location }}"
+        virtual_network: "{{ cap_compute_azure_vnet_id }}"
+        subnet_name: "{{ cap_compute_azure_subnet }}"
+        create_with_security_group: false
+        ip_configurations:
+          - name: ipconfig1
+            primary: true
+            private_ip_allocation_method: Dynamic
+        tags: "{{ cap_spec.tags }}"
+      register: cap_compute_azure_nic
+
+    - name: Ensure the virtual machine
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ cap_compute_azure_cfg.resource_group }}"
+        name: "{{ cap_spec.name }}"
+        location: "{{ cap_compute_azure_location }}"
+        zones: "{{ cap_compute_azure_zones if cap_compute_azure_zones | length > 0 else omit }}"
+        vm_size: "{{ cap_compute_azure_vm_size }}"
+        image: "{{ cap_compute_azure_image }}"
+        license_type: "{{ cap_compute_azure_cfg.license_type | default(omit) }}"
+        admin_username: "{{ cap_compute_azure_cfg.admin_username }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ cap_compute_azure_cfg.admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ cap_compute_azure_cfg.admin_ssh_public_key }}"
+        network_interface_names:
+          - "{{ cap_compute_azure_nic_name }}"
+        os_disk_name: "{{ cap_spec.name }}-os"
+        os_disk_size_gb: "{{ (cap_spec.disks | selectattr('role', 'equalto', 'os') | first).size_gb }}"
+        managed_disk_type: "{{ cap_compute_azure_cfg.os_disk_type }}"
+        os_disk_caching: "{{ cap_compute_azure_cfg.os_disk_caching }}"
+        data_disks: "{{ cap_compute_azure_data_disks }}"
+        security_profile:
+          encryption_at_host: "{{ cap_compute_azure_cfg.encryption_at_host | bool }}"
+        boot_diagnostics:
+          enabled: true
+          type: managed
+        vm_identity: "{{ {'type': 'SystemAssigned'} if cap_compute_azure_cfg.system_assigned_identity | bool else omit }}"
+        started: true
+        tags: "{{ cap_spec.tags }}"
+
+- name: Record the private IP address
+  ansible.builtin.set_fact:
+    cap_compute_azure_ip: >-
+      {{ cap_compute_azure_nic.state.ip_configurations | default([])
+         | map(attribute='private_ip_address') | select | list | first | default('') }}
+
+# In check mode a not-yet-created NIC has no address, so a plan shows a placeholder. Never accept
+# an empty address for a real run.
+- name: Require an address (a placeholder is allowed in check mode only)
+  ansible.builtin.assert:
+    that: cap_compute_azure_ip | length > 0 or ansible_check_mode
+    fail_msg: "The network interface returned no private IP address"
+    quiet: true
+
+- name: Use a placeholder address in a plan
+  ansible.builtin.set_fact:
+    cap_compute_azure_ip: 0.0.0.0
+  when: cap_compute_azure_ip | length == 0
+
+- name: Compute contract result
+  ansible.builtin.include_tasks: _result.yml
+  vars:
+    _azure_state: present

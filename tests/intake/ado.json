@@ -1,0 +1,1 @@
+{"id": 123, "fields": {"System.Title": "ignored", "Custom.AppName": "sample-app01", "Custom.Environment": "Development", "Custom.Size": "Small", "Custom.OSImage": "RHEL 8 Standard", "Custom.Network": "app-lab", "Custom.Middleware": "None", "Custom.TtlDays": 14}}

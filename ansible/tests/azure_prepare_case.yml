@@ -1,0 +1,19 @@
+---
+# One negative case: _prepare must FAIL for the mutated input; reaching 'rescued' is the pass.
+- name: "Expect rejection: {{ item.name }}"
+  vars:
+    cap_spec: "{{ good_spec | combine(item.spec | default({})) }}"
+    cap_cfg: "{{ good_cfg | combine(item.cfg | default({})) }}"
+  block:
+    - name: Run prepare (must fail)
+      ansible.builtin.include_role:
+        name: cap_compute_azure
+        tasks_from: _prepare
+    - name: Reached only if the bad input was wrongly accepted
+      ansible.builtin.fail:
+        msg: "Case '{{ item.name }}' was accepted but must be rejected"
+  rescue:
+    - name: Confirm it was rejected by the driver's own gate, not by some other error
+      ansible.builtin.assert:
+        that: "'Unsupported value for the azure compute driver' in (ansible_failed_result.msg | default(''))"
+        quiet: true
