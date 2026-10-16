@@ -1,0 +1,95 @@
+---
+# Read-only. Use:  include_role: {name: tomcat, tasks_from: validate}
+- name: Check the service is running
+  ansible.builtin.service_facts:
+
+- name: Assert the service is running
+  ansible.builtin.assert:
+    that: (ansible_facts['services'][tomcat_service_name ~ '.service']['state'] | default('absent')) == 'running'
+    fail_msg: "{{ tomcat_service_name }} is not running"
+    quiet: true
+
+- name: Query the health page
+  ansible.builtin.uri:
+    url: "{{ tomcat_health_url }}"
+    return_content: true
+    status_code: 200
+  register: tomcat_health
+  until: tomcat_health.status == 200
+  retries: 12
+  delay: 5
+
+- name: Assert the health page answers OK
+  ansible.builtin.assert:
+    that: (tomcat_health.content | default('') | trim) == 'OK'
+    fail_msg: "Health page did not answer OK: {{ tomcat_health.content | default('') }}"
+    quiet: true
+
+- name: Read where tomcat_home points
+  ansible.builtin.stat:
+    path: "{{ tomcat_home }}"
+  register: tomcat_home_stat
+
+- name: Assert the expected version is active
+  ansible.builtin.assert:
+    that:
+      - tomcat_home_stat.stat.islnk | default(false)
+      - tomcat_home_stat.stat.lnk_source | default('') is search('/apache-tomcat-' ~ tomcat_version ~ '$')
+    fail_msg: "{{ tomcat_home }} does not point at apache-tomcat-{{ tomcat_version }}"
+    quiet: true
+
+# 'ss -H' columns: State Recv-Q Send-Q Local:Port Peer:Port  -> column index 3 is the LOCAL address.
+- name: List listeners on the HTTP port
+  ansible.builtin.command: "ss -H -ltn 'sport = :{{ tomcat_http_port }}'"
+  register: tomcat_http_listeners
+  changed_when: false
+
+- name: Assert HTTP is loopback-only unless a bind address was requested
+  ansible.builtin.assert:
+    that:
+      - tomcat_http_listeners.stdout_lines | length > 0
+      - >-
+        tomcat_bind_address != '' or
+        tomcat_http_listeners.stdout_lines | map('split') | map(attribute='3')
+        | reject('match', '^(127\.0\.0\.1|\[::1\]|\[::ffff:127\.0\.0\.1\]):') | list | length == 0
+    fail_msg: "HTTP port {{ tomcat_http_port }} is exposed beyond loopback: {{ tomcat_http_listeners.stdout }}"
+    quiet: true
+
+# The shutdown port is disabled in server.xml; nothing may listen on Tomcat's default 8005.
+- name: List listeners on the default shutdown port
+  ansible.builtin.command: "ss -H -ltn 'sport = :8005'"
+  register: tomcat_shutdown_listeners
+  changed_when: false
+
+- name: Assert the shutdown port is closed
+  ansible.builtin.assert:
+    that: tomcat_shutdown_listeners.stdout_lines | length == 0
+    fail_msg: "Something listens on 8005 (Tomcat shutdown port): {{ tomcat_shutdown_listeners.stdout }}"
+    quiet: true
+
+- name: Read the service unit properties (no state change - name only)
+  ansible.builtin.systemd_service:
+    name: "{{ tomcat_service_name }}.service"
+  register: tomcat_unit
+
+- name: Assert the service does not run as root
+  ansible.builtin.assert:
+    that: (tomcat_unit.status.User | default('')) not in ['', 'root']
+    fail_msg: "{{ tomcat_service_name }} runs as '{{ tomcat_unit.status.User | default('') }}' - expected a dedicated account"
+    quiet: true
+
+- name: Look for default webapps
+  ansible.builtin.stat:
+    path: "{{ tomcat_home }}/webapps/{{ item }}"
+  register: tomcat_default_apps
+  loop: [ROOT, docs, examples, manager, host-manager]
+  when: tomcat_remove_default_webapps | bool
+
+- name: Assert no default webapps remain
+  ansible.builtin.assert:
+    that: tomcat_default_apps.results | selectattr('stat', 'defined') | selectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      Default webapps present: {{ tomcat_default_apps.results | selectattr('stat', 'defined')
+      | selectattr('stat.exists') | map(attribute='item') | list }}
+    quiet: true
+  when: tomcat_remove_default_webapps | bool

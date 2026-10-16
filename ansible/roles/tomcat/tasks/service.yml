@@ -1,0 +1,19 @@
+---
+# Apply any pending restart first (on a fresh host this is the first start), so the steps below
+# check the configuration that was just written rather than the one before it.
+- name: Apply pending restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the service
+  ansible.builtin.systemd_service:
+    name: "{{ tomcat_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for the HTTP connector
+  ansible.builtin.wait_for:
+    host: "{{ (tomcat_bind_address in ['', '0.0.0.0']) | ternary('127.0.0.1', tomcat_bind_address) }}"
+    port: "{{ tomcat_http_port }}"
+    timeout: "{{ tomcat_start_timeout }}"
+    state: started

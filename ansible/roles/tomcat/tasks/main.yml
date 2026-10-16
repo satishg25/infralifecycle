@@ -1,0 +1,26 @@
+---
+# Flow: assert -> install (source-specific) -> configure files -> start -> firewall.
+# Unlike JBoss there is no management CLI: Tomcat is configured through templated files, so a
+# plan (--check --diff) can preview config changes on a host that already has this version.
+# Run the read-only checks separately with:  tasks_from: validate
+- name: Assert platform preconditions
+  ansible.builtin.import_tasks: assert.yml
+  tags: [tomcat, tomcat_assert]
+
+- name: Install Tomcat from the selected source
+  ansible.builtin.include_tasks: "install_{{ tomcat_install_source }}.yml"
+  tags: [tomcat, tomcat_install]
+
+- name: Configure server.xml, systemd unit and webapps
+  ansible.builtin.import_tasks: configure.yml
+  when: not (tomcat_preview_blind | default(false) | bool)   # a plan on a host without this version has nothing to diff
+  tags: [tomcat, tomcat_configure]
+
+- name: Start the service
+  ansible.builtin.import_tasks: service.yml
+  when: not ansible_check_mode   # needs the installed unit; a plan cannot preview it
+  tags: [tomcat, tomcat_service]
+
+- name: Open firewall ports requested by the profile
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [tomcat, tomcat_firewall]

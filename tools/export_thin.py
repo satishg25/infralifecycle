@@ -12,8 +12,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ROLES = ["jboss", "validation", "rhel_baseline"]          # add tomcat here when it exists
-PLAYBOOKS = {"ansible/playbooks/thin/jboss_standalone.yml": "playbooks/jboss_standalone.yml"}
+ROLES = ["jboss", "tomcat", "validation", "rhel_baseline"]
+PLAYBOOKS = {
+    "ansible/playbooks/thin/jboss_standalone.yml": "playbooks/jboss_standalone.yml",
+    "ansible/playbooks/thin/tomcat_standalone.yml": "playbooks/tomcat_standalone.yml",
+}
 FRAMEWORK_WORDS = ("capability_dispatch", "machine_resolve", "machine_spec", "machine_result", "profile_dir", "cap_cfg")
 
 CFG = """[defaults]

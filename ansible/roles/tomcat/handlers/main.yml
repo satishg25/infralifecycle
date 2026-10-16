@@ -1,0 +1,7 @@
+---
+# Handlers run once, at the end of the play or when service.yml flushes them, only if notified.
+- name: Restart tomcat
+  ansible.builtin.systemd_service:
+    name: "{{ tomcat_service_name }}"
+    state: restarted
+    daemon_reload: true

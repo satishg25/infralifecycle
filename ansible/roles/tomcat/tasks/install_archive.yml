@@ -1,0 +1,118 @@
+---
+# Archive from Apache (or the internal artifact repo): the download is refused unless it matches
+# the pinned sha512. Program files are owned by root and only readable by the service group;
+# the service account can write to logs/temp/work/webapps only.
+- name: Install the Java runtime
+  ansible.builtin.dnf:
+    name: "{{ tomcat_java_package }}"
+    state: present
+
+- name: Create the service group
+  ansible.builtin.group:
+    name: "{{ tomcat_group }}"
+    system: true
+
+- name: Create the service account (no login shell)
+  ansible.builtin.user:
+    name: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    system: true
+    shell: /sbin/nologin
+    home: "{{ tomcat_base_dir }}"
+    create_home: false
+
+- name: Create the base directory
+  ansible.builtin.file:
+    path: "{{ tomcat_base_dir }}"
+    state: directory
+    owner: root
+    group: "{{ tomcat_group }}"
+    mode: "0750"
+
+- name: Check whether this version is already unpacked
+  ansible.builtin.stat:
+    path: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}/bin/catalina.sh"
+  register: tomcat_version_stat
+
+# In a plan on a host without this version there is nothing on disk to configure or diff.
+- name: Note whether a plan can preview the configuration
+  ansible.builtin.set_fact:
+    tomcat_preview_blind: "{{ ansible_check_mode and not tomcat_version_stat.stat.exists }}"
+
+- name: Show what a plan would download
+  ansible.builtin.debug:
+    msg: "Would download and unpack {{ tomcat_archive_url }} (sha512 verified) into {{ tomcat_base_dir }}"
+  when: tomcat_preview_blind | bool
+
+# The download and unpack need the directories created above, which a plan does not create.
+- name: Download the archive (sha512 verified)
+  ansible.builtin.get_url:
+    url: "{{ tomcat_archive_url }}"
+    dest: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    checksum: "sha512:{{ tomcat_archive_sha512 }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - not tomcat_version_stat.stat.exists
+    - not ansible_check_mode
+
+- name: Unpack the archive
+  ansible.builtin.unarchive:
+    src: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    dest: "{{ tomcat_base_dir }}"
+    remote_src: true
+    owner: root
+    group: "{{ tomcat_group }}"
+  when:
+    - not tomcat_version_stat.stat.exists
+    - not ansible_check_mode
+
+- name: Remove the downloaded archive
+  ansible.builtin.file:
+    path: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    state: absent
+
+# Only right after unpacking: a recursive reset on later runs would take the writable
+# directories below back from the service account on every run.
+- name: Make program files readable by the service group only
+  ansible.builtin.file:
+    path: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}"
+    state: directory
+    recurse: true
+    owner: root
+    group: "{{ tomcat_group }}"
+    mode: "u=rwX,g=rX,o="
+  when:
+    - not tomcat_version_stat.stat.exists
+    - not ansible_check_mode
+
+- name: Give the service account its writable directories
+  ansible.builtin.file:
+    path: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}/{{ item }}"
+    state: directory
+    recurse: true
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    mode: "u=rwX,g=rX,o="
+  loop: [logs, temp, work, webapps]
+  when: not (tomcat_preview_blind | bool)
+
+# Non-recursive, every run: the service account must be able to enter the version directory.
+- name: Keep the version directory traversable by the service group
+  ansible.builtin.file:
+    path: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}"
+    state: directory
+    owner: root
+    group: "{{ tomcat_group }}"
+    mode: "0750"
+  when: not (tomcat_preview_blind | bool)
+
+# No owner/group here: with state=link the file module applies them to the link TARGET.
+- name: Point tomcat_home at this version
+  ansible.builtin.file:
+    src: "{{ tomcat_base_dir }}/apache-tomcat-{{ tomcat_version }}"
+    dest: "{{ tomcat_home }}"
+    state: link
+  notify: Restart tomcat
+  when: not (tomcat_preview_blind | bool)

@@ -1,0 +1,55 @@
+---
+# Files, not a CLI: every change is a template/copy, so it is idempotent and shows up in --diff.
+# Anything that changes notifies one restart, which service.yml flushes before checking health.
+# conf/ is read-only for the service account, so Tomcat cannot create its per-host deployment
+# directory itself (it logs SEVERE at start-up). Create it here, read-only as well.
+- name: Create the per-host deployment directory
+  ansible.builtin.file:
+    path: "{{ tomcat_home }}/conf/{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ tomcat_group }}"
+    mode: "0750"
+  loop: [Catalina, Catalina/localhost]
+
+- name: Write the hardened server.xml
+  ansible.builtin.template:
+    src: server.xml.j2
+    dest: "{{ tomcat_home }}/conf/server.xml"
+    owner: root
+    group: "{{ tomcat_group }}"
+    mode: "0640"
+  notify: Restart tomcat
+
+- name: Remove the default webapps
+  ansible.builtin.file:
+    path: "{{ tomcat_home }}/webapps/{{ item }}"
+    state: absent
+  loop: [ROOT, docs, examples, manager, host-manager]
+  when: tomcat_remove_default_webapps | bool
+  notify: Restart tomcat
+
+- name: Create the health context
+  ansible.builtin.file:
+    path: "{{ tomcat_home }}/webapps/{{ tomcat_health_context }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    mode: "0750"
+
+- name: Write the health page
+  ansible.builtin.copy:
+    dest: "{{ tomcat_home }}/webapps/{{ tomcat_health_context }}/index.html"
+    content: "OK\n"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    mode: "0640"
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: tomcat.service.j2
+    dest: "/etc/systemd/system/{{ tomcat_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart tomcat
