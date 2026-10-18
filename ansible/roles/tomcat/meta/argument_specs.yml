@@ -1,0 +1,30 @@
+---
+argument_specs:
+  main:
+    short_description: Install and configure Apache Tomcat 10.1 (standalone) from a checksum-pinned archive, with a pluggable source
+    options: &opts
+      tomcat_install_source: {type: str, default: archive, choices: [archive, rpm]}
+      tomcat_version: {type: str}
+      tomcat_archive_url: {type: str}
+      tomcat_archive_sha512: {type: str}
+      tomcat_java_package: {type: str}
+      tomcat_java_home: {type: path}
+      tomcat_base_dir: {type: path}
+      tomcat_home: {type: path}
+      tomcat_user: {type: str}
+      tomcat_group: {type: str}
+      tomcat_service_name: {type: str, default: tomcat}
+      tomcat_rpm_package: {type: str}
+      tomcat_repo_hint: {type: str}
+      tomcat_bind_address: {type: str, default: ""}
+      tomcat_http_port: {type: int, default: 8080}
+      tomcat_firewall_ports: {type: list, elements: str}
+      tomcat_remove_default_webapps: {type: bool}
+      tomcat_auto_deploy: {type: bool}
+      tomcat_java_opts: {type: str}
+      tomcat_health_context: {type: str}
+      tomcat_health_url: {type: str}
+      tomcat_start_timeout: {type: int}
+  validate:
+    short_description: Read-only checks - service, health, listener exposure, shutdown port, service account
+    options: *opts

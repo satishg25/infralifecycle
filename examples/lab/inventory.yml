@@ -1,0 +1,15 @@
+---
+# Local lab: two Rocky Linux 9 containers with systemd, reachable over SSH on mapped ports.
+# Host key checking stays on - record the keys once with:
+#   ssh-keyscan -p 2231 -t ed25519 127.0.0.1 >> ~/.ssh/known_hosts   (and 2232)
+all:
+  children:
+    middleware_nodes:
+      hosts:
+        rocky1:
+          ansible_port: 2231
+        rocky2:
+          ansible_port: 2232
+      vars:
+        ansible_host: 127.0.0.1
+        ansible_user: ansible   # non-root with sudo; the key comes from ~/.ssh / ssh-agent

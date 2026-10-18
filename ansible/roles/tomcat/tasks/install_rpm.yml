@@ -1,0 +1,11 @@
+---
+# Placeholder for the "JBoss Web Server from Satellite" source. To implement later:
+#   check the repo is enabled (as jboss/install_rpm.yml does) -> dnf {{ tomcat_rpm_package }}
+#   -> set tomcat_home / tomcat_service_name / tomcat_user for the JWS layout
+#   -> set tomcat_preview_blind like install_archive.yml does.
+# Everything after install (configure/service/firewall/validate) is source-agnostic.
+- name: Fail - rpm install is not implemented yet
+  ansible.builtin.fail:
+    msg: >-
+      tomcat_install_source=rpm is not implemented yet. Use archive, or implement
+      roles/tomcat/tasks/install_rpm.yml (see the comments in that file) for {{ tomcat_repo_hint }}.

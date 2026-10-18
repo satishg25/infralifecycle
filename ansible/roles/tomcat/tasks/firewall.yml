@@ -1,0 +1,9 @@
+---
+# Nothing is opened unless the profile lists ports.
+- name: Open requested application ports
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ tomcat_firewall_ports }}"

@@ -51,6 +51,7 @@ jobs:
           W="-e profile_dir=../profiles/example-vmware-lab -e request_file=../profiles/example-vmware-lab/sample-request.json"
           ansible-playbook playbooks/provision.yml $W --syntax-check
           ansible-playbook playbooks/thin/jboss_standalone.yml -i localhost, -e @../examples/baloise/jboss_standalone.vars.yml --syntax-check
+          ansible-playbook playbooks/thin/tomcat_standalone.yml -i ../examples/lab/inventory.yml -e @../examples/lab/tomcat_standalone.vars.yml --syntax-check
 
       - name: Template tests (no RHEL host needed)
         working-directory: ansible
@@ -71,6 +72,7 @@ jobs:
           cd "$RUNNER_TEMP/thin"
           ansible-galaxy collection install -r requirements.yml
           ansible-playbook playbooks/jboss_standalone.yml -i inventory.yml -e @examples/jboss_standalone.vars.yml --syntax-check
+          ansible-playbook playbooks/tomcat_standalone.yml -i inventory.yml --syntax-check
           ansible-lint
 
       - name: Logic test - management exposure check

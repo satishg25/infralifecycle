@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Apache Tomcat {{ tomcat_version }}
+After=network.target
+
+[Service]
+Type=simple
+User={{ tomcat_user }}
+Group={{ tomcat_group }}
+Environment=JRE_HOME={{ tomcat_java_home }}
+Environment=CATALINA_HOME={{ tomcat_home }}
+Environment=CATALINA_BASE={{ tomcat_home }}
+Environment=CATALINA_TMPDIR={{ tomcat_home }}/temp
+Environment="CATALINA_OPTS={{ tomcat_java_opts }}"
+ExecStart={{ tomcat_home }}/bin/catalina.sh run
+# The JVM exits 143 on SIGTERM - that is a clean stop, not a failure.
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

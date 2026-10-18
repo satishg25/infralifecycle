@@ -13,7 +13,7 @@ A customer-agnostic baseline for request-driven infrastructure automation: **log
 | Capability dispatch | `roles/capability_dispatch` | No - capability → driver binding from the profile |
 | Drivers (`cap_<capability>_<driver>`) | `roles/cap_compute_mock` (more to come) | Provider-specific by design, isolated here |
 | OS baseline + validation | `roles/rhel_baseline`, `roles/validation` | No - consume `machine_result` only |
-| Workload roles | `roles/jboss` (EAP 8 standalone, RPM via Satellite; `archive` source is a placeholder), `tomcat` next | No |
+| Workload roles | `roles/jboss` (EAP 8 standalone, RPM via Satellite; `archive` source is a placeholder), `roles/tomcat` (10.1 standalone, checksum-pinned archive; `rpm`/JWS source is a placeholder) | No |
 | **Profile** | `profiles/<customer>/` | **Yes - the only thing that changes** |
 
 ## Contracts
@@ -94,6 +94,19 @@ Same contract as every compute driver, so all four use cases (JBoss/Tomcat, stan
 - **Ownership guard:** the VM annotation carries `managed_by=platform-kit request_id=...`; `revert` deletes only a VM whose annotation matches this request.
 - **Checked here:** lint, syntax-check, module parameters against `community.vmware` 7.0.0 source, derivation/validation logic and disk-map logic with synthetic output (`ansible/tests/vmware_prepare.yml`). **Not checked:** any vCenter call; guest customisation; `wait_for_ip`; the `/dev/disk/by-id/wwn-0x<uuid>` disk naming (confirm on the first VM); revert on a missing VM (relies on the module error text containing "non-existing"); Galaxy availability of the pinned versions.
 
+## Tomcat (`roles/tomcat`) - run against Rocky Linux 9 containers, NOT yet against RHEL
+Thin entry point: `ansible/playbooks/thin/tomcat_standalone.yml` (same flat-variable contract as the JBoss one, plus `run_os_validation`).
+- **Source seam:** `tomcat_install_source: archive` (implemented) downloads `tomcat_archive_url` and refuses it unless it matches `tomcat_archive_sha512`; point the URL at your artifact repo. `rpm` (JBoss Web Server from Satellite) fails with a clear message until implemented.
+- **Layout:** each version unpacks to `/opt/tomcat/apache-tomcat-<version>`; `/opt/tomcat/current` is a symlink to the active one (upgrade = new version vars, rollback = old ones). Program files are root-owned and group-readable; the `tomcat` account (nologin) can write only `logs`, `temp`, `work`, `webapps`.
+- **Secure defaults:** loopback-only HTTP unless `tomcat_bind_address` is set, shutdown port disabled, no AJP, default webapps removed, no error details or server info, no hot deploy, systemd unit with `NoNewPrivileges`/`ProtectSystem`. Validation checks the service, a role-owned `/health/` page, the active version, listener exposure, port 8005 closed, the non-root account and the absence of default webapps.
+- **Local lab** (two Rocky Linux 9 containers with systemd on SSH ports 2231/2232, HTTP 8081/8082):
+```bash
+cd ansible
+ansible-playbook playbooks/thin/tomcat_standalone.yml -i ../examples/lab/inventory.yml -e @../examples/lab/tomcat_standalone.vars.yml --check --diff
+ansible-playbook playbooks/thin/tomcat_standalone.yml -i ../examples/lab/inventory.yml -e @../examples/lab/tomcat_standalone.vars.yml
+```
+- **Checked here:** lint (production profile), syntax-check, thin export; on the containers: check-mode plan on a fresh host, install, validation, second run `changed=0`, restart with no SEVERE log lines. **Not checked:** RHEL 8/9 proper, SELinux enforcing, firewalld, the `validation` role on these hosts, the request/profile path (`middleware: tomcat` is not in `request.v1` yet).
+
 ## Thin layer for a customer app (Baloise)
 `ansible/playbooks/thin/jboss_standalone.yml` takes flat extra variables and assumes the VM exists. `python3 tools/export_thin.py <dir>` copies the roles plus the playbook without any framework code (fails if framework words leak). See `docs/BALOISE-HANDOVER.md`.
 
@@ -124,7 +137,7 @@ Copy `profiles/example-lab/`, set `policy.allow_mock: false`, bind real drivers,
 ## Roadmap (build one slice at a time)
 1. ✅ Contracts, dispatcher, mock compute, profile, CI
 2. ✅ (code complete, awaiting RHEL test) `rhel_baseline` + `validation`, `existing` driver, `add_host` inventory
-3. ✅ (code complete, awaiting RHEL + Satellite test) `jboss` standalone via RPM; next `tomcat`, then the `archive` source, TLS role
+3. ✅ (code complete, awaiting RHEL + Satellite test) `jboss` standalone via RPM; ✅ `tomcat` standalone via archive (tested on Rocky 9 containers); next wire `tomcat` into `request.v1`/profiles, then the jboss `archive` source, TLS role
 4. ✅ (written, untested) `azure` and `vmware` compute drivers, intake adapters; next `terraform` driver
 5. Enterprise capability drivers with apply/revert pairs (ipam, dns, identity, config_mgmt, cmdb, backup, agents)
 6. HA + `lb` capability; AAP launch adapter; intake workflow
