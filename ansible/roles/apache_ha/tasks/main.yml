@@ -1,0 +1,29 @@
+---
+# Flow: assert -> create missing resources / correct drifted VIP parameters -> wait until running.
+# Runs after apache_httpd (cluster-managed: installed, configured, disabled at boot) and
+# pacemaker_cluster. All cluster changes run once; pcs applies them cluster-wide.
+# Run the read-only checks with:  tasks_from: validate
+- name: Assert the inputs
+  ansible.builtin.import_tasks: assert.yml
+  tags: [apache_ha, apache_ha_assert]
+
+- name: Check whether the cluster tools are installed
+  ansible.builtin.stat:
+    path: /usr/sbin/crm_resource
+  register: apache_ha_tools_stat
+  tags: [apache_ha, apache_ha_resources]
+
+- name: Show what a plan would create
+  ansible.builtin.debug:
+    msg: >-
+      The cluster is not installed yet: would create group {{ apache_ha_group }} =
+      {{ apache_ha_vip_resource }} ({{ apache_ha_vip_address }}/{{ apache_ha_vip_cidr_netmask }})
+      + {{ apache_ha_web_resource }} (systemd:{{ apache_ha_service_name }})
+  run_once: true
+  when: ansible_check_mode and not apache_ha_tools_stat.stat.exists
+  tags: [apache_ha, apache_ha_resources]
+
+- name: Create and correct the cluster resources
+  ansible.builtin.import_tasks: resources.yml
+  when: apache_ha_tools_stat.stat.exists   # in a plan on new hosts there is no cluster to read yet
+  tags: [apache_ha, apache_ha_resources]

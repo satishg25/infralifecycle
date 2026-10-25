@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+<VirtualHost {{ apache_httpd_listen_address or '*' }}:{{ apache_httpd_listen_port }}>
+    ServerName {{ apache_httpd_server_name }}
+    DocumentRoot "{{ apache_httpd_document_root }}"
+
+    <Directory "{{ apache_httpd_document_root }}">
+        Options -Indexes
+        AllowOverride None
+        Require all granted
+    </Directory>
+{% if apache_httpd_proxy_members | length > 0 %}
+
+    # Load balancer: sticky on {{ apache_httpd_proxy_sticky_cookie }} (suffix .<route>); a member that
+    # refuses connections is skipped and retried after {{ apache_httpd_proxy_retry }}s.
+    <Proxy "balancer://app">
+{% for member in apache_httpd_proxy_members %}
+        BalancerMember "{{ member.url }}" route={{ member.route }} retry={{ apache_httpd_proxy_retry }}
+{% endfor %}
+        ProxySet lbmethod=byrequests stickysession={{ apache_httpd_proxy_sticky_cookie }}|{{ apache_httpd_proxy_sticky_cookie | lower }}
+    </Proxy>
+    ProxyPreserveHost On
+    ProxyPass "/{{ apache_httpd_health_context }}/" "!"
+    ProxyPass "{{ apache_httpd_proxy_path }}" "balancer://app{{ apache_httpd_proxy_path }}"
+    ProxyPassReverse "{{ apache_httpd_proxy_path }}" "balancer://app{{ apache_httpd_proxy_path }}"
+{% if apache_httpd_proxy_route_header | bool %}
+    Header always set X-Backend-Route "%{BALANCER_WORKER_ROUTE}e"
+{% endif %}
+{% endif %}
+</VirtualHost>

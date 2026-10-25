@@ -107,8 +107,25 @@ ansible-playbook playbooks/thin/tomcat_standalone.yml -i ../examples/lab/invento
 ```
 - **Checked here:** lint (production profile), syntax-check, thin export; on the containers: check-mode plan on a fresh host, install, validation, second run `changed=0`, restart with no SEVERE log lines. **Not checked:** RHEL 8/9 proper, SELinux enforcing, firewalld, the `validation` role on these hosts, the request/profile path (`middleware: tomcat` is not in `request.v1` yet).
 
+- **Rocky Linux 8 lab (2026-10-25):** also passes `lab/run.sh tomcat_standalone --fresh` with ansible-core 2.16 (see below). New option `tomcat_jvm_route` for nodes behind a sticky balancer.
+
+## Tomcat and Apache HA (`tomcat_ha`, `apache_standalone`, `apache_ha`) - tested on Rocky Linux 8 containers, NOT yet on RHEL
+Thin entry points in `ansible/playbooks/thin/` (each header lists its flat-variable contract):
+- `tomcat_ha.yml` - 2+ `tomcat` nodes (unique `jvmRoute`, bound to their primary IPv4) behind an `apache_httpd` load balancer: sticky sessions, a node that refuses connections is skipped and retried. `run_load_balancer: false` when the platform provides the balancer. No session replication.
+- `apache_standalone.yml` - role `apache_httpd`: owns the single `Listen` line, `ServerTokens Prod`, TRACE off, welcome page blanked, own `/health/` page, `httpd -t` before any reload, optional reverse proxy (`apache_httpd_proxy_members`).
+- `apache_ha.yml` - roles `apache_httpd` (cluster-managed: configured on every node, never enabled), `pacemaker_cluster` (pcs auth with the password on stdin, cluster once, properties only when they differ, fails closed on fencing) and `apache_ha` (group = `IPaddr2` VIP then `systemd:httpd`, stickiness, VIP drift corrected).
+
+**Local lab** (`lab/`): Rocky Linux 8 containers with systemd on a private Docker network (fixed IPs, VIP 172.30.0.40). One command per use case: plan on a fresh host, apply, second apply must be `changed=0` on every host, then a failover drill for the HA cases (`lab/tests/`).
+```bash
+# Linux/WSL with Docker; ansible-core 2.16 (RHEL 8 targets), collections from ansible/requirements.yml, passlib
+lab/run.sh all --fresh          # or: tomcat_standalone | tomcat_ha | apache_standalone | apache_ha
+lab/run.sh down
+```
+- **RHEL 8 needs ansible-core 2.16**: RHEL 8's system Python is 3.6, which ansible-core 2.17+ cannot manage (`dnf`). AAP 2.5's execution environments ship 2.16. `run.sh` refuses newer versions.
+- **Checked here:** all four use cases as above (2026-10-25, ansible-core 2.16.19); lint (production profile). **Not checked:** RHEL proper and its HA repo, SELinux enforcing, firewalld, real fencing devices, the VIP on a real network, `run_os_validation`/`run_baseline` with these playbooks. Details: `docs/MIDDLEWARE-HANDOVER.md`.
+
 ## Thin layer for a customer app (Baloise)
-`ansible/playbooks/thin/jboss_standalone.yml` takes flat extra variables and assumes the VM exists. `python3 tools/export_thin.py <dir>` copies the roles plus the playbook without any framework code (fails if framework words leak). See `docs/BALOISE-HANDOVER.md`.
+`ansible/playbooks/thin/jboss_standalone.yml` takes flat extra variables and assumes the VM exists. `python3 tools/export_thin.py <dir>` copies the roles, all thin playbooks (JBoss, Tomcat, Apache, standalone and HA), example variables and the container lab without any framework code (fails if framework words leak). The export's README is `docs/MIDDLEWARE-HANDOVER.md`; the JBoss notes are `docs/BALOISE-HANDOVER.md`.
 
 ## Add a driver
 1. Create `roles/cap_<capability>_<driver>/` with `tasks/{apply,validate,revert}.yml`.
@@ -137,7 +154,7 @@ Copy `profiles/example-lab/`, set `policy.allow_mock: false`, bind real drivers,
 ## Roadmap (build one slice at a time)
 1. ✅ Contracts, dispatcher, mock compute, profile, CI
 2. ✅ (code complete, awaiting RHEL test) `rhel_baseline` + `validation`, `existing` driver, `add_host` inventory
-3. ✅ (code complete, awaiting RHEL + Satellite test) `jboss` standalone via RPM; ✅ `tomcat` standalone via archive (tested on Rocky 9 containers); next wire `tomcat` into `request.v1`/profiles, then the jboss `archive` source, TLS role
+3. ✅ (code complete, awaiting RHEL + Satellite test) `jboss` standalone via RPM; ✅ `tomcat` standalone via archive (tested on Rocky 9 and 8 containers); ✅ `tomcat_ha`, `apache_standalone`, `apache_ha` (tested on Rocky 8 containers incl. failover drills); next wire `tomcat` into `request.v1`/profiles, then the jboss `archive` source, TLS role
 4. ✅ (written, untested) `azure` and `vmware` compute drivers, intake adapters; next `terraform` driver
 5. Enterprise capability drivers with apply/revert pairs (ipam, dns, identity, config_mgmt, cmdb, backup, agents)
 6. HA + `lb` capability; AAP launch adapter; intake workflow

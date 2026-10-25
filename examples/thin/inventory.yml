@@ -1,0 +1,24 @@
+---
+# Example inventory for the thin playbooks. In AAP this comes from their inventory source instead.
+# Hosts are non-root with sudo; the key comes from the AAP machine credential / ssh-agent.
+all:
+  vars:
+    ansible_user: automation
+  children:
+    middleware_nodes:      # jboss_standalone.yml, tomcat_standalone.yml
+      hosts:
+        vm01.example.invalid:
+    tomcat_nodes:          # tomcat_ha.yml - 2+ identical nodes
+      hosts:
+        tc01.example.invalid:
+        tc02.example.invalid:
+    tomcat_lb:             # tomcat_ha.yml - the Apache balancer (skip with run_load_balancer: false)
+      hosts:
+        tclb01.example.invalid:
+    web_nodes:             # apache_standalone.yml
+      hosts:
+        web01.example.invalid:
+    web_cluster:           # apache_ha.yml - 2 nodes in one subnet
+      hosts:
+        webha01.example.invalid:
+        webha02.example.invalid:

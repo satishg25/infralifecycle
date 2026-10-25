@@ -52,6 +52,9 @@ jobs:
           ansible-playbook playbooks/provision.yml $W --syntax-check
           ansible-playbook playbooks/thin/jboss_standalone.yml -i localhost, -e @../examples/baloise/jboss_standalone.vars.yml --syntax-check
           ansible-playbook playbooks/thin/tomcat_standalone.yml -i ../examples/lab/inventory.yml -e @../examples/lab/tomcat_standalone.vars.yml --syntax-check
+          for p in tomcat_ha apache_standalone apache_ha; do
+            ansible-playbook playbooks/thin/$p.yml -i ../lab/inventory.yml -e @../lab/vars/$p.yml --syntax-check
+          done
 
       - name: Template tests (no RHEL host needed)
         working-directory: ansible
@@ -73,6 +76,10 @@ jobs:
           ansible-galaxy collection install -r requirements.yml
           ansible-playbook playbooks/jboss_standalone.yml -i inventory.yml -e @examples/jboss_standalone.vars.yml --syntax-check
           ansible-playbook playbooks/tomcat_standalone.yml -i inventory.yml --syntax-check
+          for p in tomcat_ha apache_standalone apache_ha; do
+            ansible-playbook playbooks/$p.yml -i inventory.yml -e @examples/$p.vars.yml --syntax-check
+          done
+          bash -n lab/run.sh
           ansible-lint
 
       - name: Logic test - management exposure check

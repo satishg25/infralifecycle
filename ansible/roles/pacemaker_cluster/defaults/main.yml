@@ -1,0 +1,34 @@
+---
+# --- Cluster ---------------------------------------------------------------------------------
+pacemaker_cluster_name: ha_cluster
+# Nodes default to the play's hosts: name = pacemaker_cluster_node_name or the short host name,
+# addr = pacemaker_cluster_node_addr or the default IPv4 (set either per host in the inventory).
+# Or give the full list here: [{name: node1, addr: 10.0.0.11}, ...]
+pacemaker_cluster_nodes: []
+
+# --- Packages ------------------------------------------------------------------------------
+# RHEL: the High Availability repo (rhel-8-for-x86_64-highavailability-rpms) must be in the
+# Satellite content view / activation key. Rocky 8 lab: ["ha"]; Rocky 9: ["highavailability"].
+pacemaker_cluster_packages: [pacemaker, pcs, fence-agents-all]
+pacemaker_cluster_enable_repos: []
+
+# --- pcsd authentication -------------------------------------------------------------------
+# The hacluster password comes from an AAP credential / Vault - never from a vars file.
+pacemaker_cluster_user: hacluster
+# pacemaker_cluster_password: (required, no default)
+
+# --- Fencing: fail closed --------------------------------------------------------------------
+# A production cluster needs fencing (STONITH). Give the devices here, e.g.
+#   - name: fence_vmware
+#     agent: fence_vmware_rest
+#     options: {ip: vcenter.example, username: ..., password: ..., ssl_insecure: "0",
+#               pcmk_host_map: "node1:vm-node1;node2:vm-node2"}
+# Disabling fencing needs BOTH stonith_enabled: false AND allow_no_fencing: true (labs only).
+pacemaker_cluster_stonith_enabled: true
+pacemaker_cluster_allow_no_fencing: false
+pacemaker_cluster_fence_devices: []
+
+# --- Behaviour -----------------------------------------------------------------------------
+pacemaker_cluster_no_quorum_policy: stop
+pacemaker_cluster_firewall_services: [high-availability]  # [] where firewalld is not used
+pacemaker_cluster_start_timeout: 180

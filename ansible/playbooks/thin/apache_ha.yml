@@ -1,0 +1,156 @@
+---
+# Thin entry point for a calling application (custom app / AAP job template): FLAT extra variables
+# in, no profile, no request file, no framework dependency. Assumes the VMs already exist and are
+# in the inventory (their VM role or job runs first).
+#
+# Active/passive Apache on a Pacemaker cluster: httpd is installed and configured on every node,
+# the cluster runs it on one node together with a floating IP (VIP) and moves both on failure.
+#
+#   ansible-playbook playbooks/thin/apache_ha.yml -i <inventory> -e @<vars file> -e @<vault file>
+#   (check mode / preview)   ... --check --diff
+#   (local lab)   lab/run.sh apache_ha
+#
+# Contract - everything is optional unless marked:
+#   target_hosts                      inventory group or host pattern, 2+ hosts (default: web_cluster)
+#   apache_ha_vip_address             REQUIRED: reserved free IPv4 address in the nodes' subnet
+#   apache_ha_vip_cidr_netmask        prefix length of that subnet               (default: 24)
+#   pacemaker_cluster_password        REQUIRED: hacluster password - from an AAP credential / Vault only
+#   pacemaker_cluster_name            1-32 letters/digits/_/-                    (default: ha_cluster)
+#   pacemaker_cluster_fence_devices   REQUIRED for production: list of {name, agent, options}
+#   pacemaker_cluster_stonith_enabled + pacemaker_cluster_allow_no_fencing   both false/true = no fencing (lab only)
+#   pacemaker_cluster_enable_repos    dnf repo ids to enable for the cluster packages (default: none)
+#   pacemaker_cluster_firewall_services   (default: ["high-availability"]; [] without firewalld)
+#   run_baseline / rhel_baseline_*    as in the other thin playbooks             (default: false)
+#   run_validation                    run read-only cluster + Apache validation  (default: true)
+#   run_os_validation                 also run the OS validation role + evidence (default: true; needs run_validation)
+#   apache_httpd_*                    as in apache_standalone.yml (port, server name, firewall ports, proxy members)
+#   (any other apache_ha_* / pacemaker_cluster_* / apache_httpd_* role variable may also be passed)
+- name: Validate the inputs before touching any host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Check target_hosts is a plain inventory pattern
+      ansible.builtin.assert:
+        that: (target_hosts | default('web_cluster')) is match('^[A-Za-z0-9_.:*,&!-]+$')
+        fail_msg: "target_hosts must be a plain inventory group/host pattern (letters, digits and _ . : * , & ! -), got '{{ target_hosts | default('') }}'"
+        quiet: true
+
+    - name: Check the boolean switches
+      ansible.builtin.assert:
+        that:
+          - (run_baseline | default(false)) | string | lower in ['true', 'false']
+          - (run_validation | default(true)) | string | lower in ['true', 'false']
+          - (run_os_validation | default(true)) | string | lower in ['true', 'false']
+        fail_msg: "run_baseline, run_validation and run_os_validation must be true or false"
+        quiet: true
+
+    - name: Check the baseline has the values it cannot default
+      ansible.builtin.assert:
+        that: not (run_baseline | default(false) | bool) or (rhel_baseline_ntp_servers | default([])) | length > 0
+        fail_msg: "run_baseline is true, so rhel_baseline_ntp_servers is required (a non-empty list)"
+        quiet: true
+
+    - name: Check the required values are present
+      ansible.builtin.assert:
+        that:
+          - apache_ha_vip_address | default('') is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+          - pacemaker_cluster_password | default('') | length >= 8
+        fail_msg: >-
+          apache_ha_vip_address (an IPv4 address) and pacemaker_cluster_password (8+ characters,
+          from an AAP credential or Vault) are required
+        quiet: true
+
+    - name: Check the fencing decision is explicit
+      ansible.builtin.assert:
+        that: >-
+          (pacemaker_cluster_stonith_enabled | default(true) | bool and (pacemaker_cluster_fence_devices | default([])) | length > 0) or
+          (not pacemaker_cluster_stonith_enabled | default(true) | bool and pacemaker_cluster_allow_no_fencing | default(false) | bool)
+        fail_msg: >-
+          Fencing: list pacemaker_cluster_fence_devices (production), or set BOTH
+          pacemaker_cluster_stonith_enabled=false and pacemaker_cluster_allow_no_fencing=true (lab only)
+        quiet: true
+
+    - name: Check httpd is left to the cluster
+      ansible.builtin.assert:
+        that: apache_httpd_cluster_managed | default(true) | bool
+        fail_msg: "apache_httpd_cluster_managed cannot be false here - the cluster must be the only thing that starts httpd"
+        quiet: true
+
+- name: Apache httpd active/passive on Pacemaker
+  hosts: "{{ target_hosts | default('web_cluster') }}"
+  become: true
+  gather_facts: true
+  vars:
+    apache_httpd_cluster_managed: true
+  tasks:
+    - name: Apply the OS baseline (only when asked - the VM role may already do this)
+      ansible.builtin.include_role:
+        name: rhel_baseline
+      when: run_baseline | default(false) | bool
+      tags: [baseline]
+
+    - name: Install and configure Apache httpd on every node (left stopped for the cluster)
+      ansible.builtin.include_role:
+        name: apache_httpd
+      tags: [apache_httpd]
+
+    - name: Form the cluster
+      ansible.builtin.include_role:
+        name: pacemaker_cluster
+      tags: [pacemaker_cluster]
+
+    - name: Create the floating IP and httpd resources
+      ansible.builtin.include_role:
+        name: apache_ha
+      tags: [apache_ha]
+
+    - name: Build the expected mount list from the data volumes
+      ansible.builtin.set_fact:
+        thin_expected_mounts: "{{ (thin_expected_mounts | default([])) + [{'path': item.mount, 'fstype': item.fs}] }}"
+      loop: "{{ rhel_baseline_data_volumes | default([]) }}"
+      loop_control:
+        label: "{{ item.mount }}"
+      when:
+        - run_validation | default(true) | bool
+        - run_os_validation | default(true) | bool
+      tags: [validate]
+
+    - name: Read-only OS validation and evidence report
+      ansible.builtin.include_role:
+        name: validation
+      vars:
+        validation_expected_mounts: "{{ thin_expected_mounts | default([]) }}"
+      when:
+        - run_validation | default(true) | bool
+        - run_os_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]
+
+    - name: Read-only cluster validation
+      ansible.builtin.include_role:
+        name: pacemaker_cluster
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]
+
+    - name: Read-only Apache validation (service ownership on every node, HTTP where it runs)
+      ansible.builtin.include_role:
+        name: apache_httpd
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]
+
+    - name: Read-only HA validation through the VIP
+      ansible.builtin.include_role:
+        name: apache_ha
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]

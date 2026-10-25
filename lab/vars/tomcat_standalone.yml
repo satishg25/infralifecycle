@@ -1,0 +1,10 @@
+---
+# Flat variables for the local container lab. Placeholders only - no secrets belong here.
+target_hosts: tomcat_standalone
+run_baseline: false          # containers have no chronyd/LVM/sshd hardening to manage
+run_validation: true         # Tomcat checks: service, health page, listeners, account
+run_os_validation: false     # containers have no SELinux/firewalld, so the OS checks cannot pass
+
+tomcat_install_source: archive
+tomcat_bind_address: "0.0.0.0"   # serve beyond loopback so the published port 8170 reaches it
+tomcat_firewall_ports: []        # no firewalld in the containers

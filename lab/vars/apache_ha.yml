@@ -1,0 +1,18 @@
+---
+# Flat variables for the local container lab. Placeholders only - the hacluster password comes
+# from lab/.state/secrets.yml, which run.sh generates and git ignores.
+target_hosts: apache_ha
+run_baseline: false
+run_validation: true
+run_os_validation: false        # containers have no SELinux/firewalld, so the OS checks cannot pass
+
+apache_ha_vip_address: 172.30.0.40
+apache_ha_vip_cidr_netmask: 24
+apache_httpd_server_name: apache-ha.lab.invalid
+
+pacemaker_cluster_name: lab_apache
+pacemaker_cluster_enable_repos: [ha]        # Rocky 8 name of the High Availability repo
+pacemaker_cluster_firewall_services: []     # no firewalld in the containers
+# LAB ONLY: containers have nothing to fence. Never copy these two lines to a real environment.
+pacemaker_cluster_stonith_enabled: false
+pacemaker_cluster_allow_no_fencing: true

@@ -1,0 +1,16 @@
+---
+# Flat variables for the local container lab. Placeholders only - no secrets belong here.
+target_hosts: tomcat_nodes
+lb_hosts: tomcat_lb
+run_load_balancer: true
+run_baseline: false
+run_validation: true
+run_os_validation: false         # containers have no SELinux/firewalld, so the OS checks cannot pass
+
+tomcat_install_source: archive
+tomcat_firewall_ports: []        # no firewalld in the containers
+
+apache_httpd_server_name: tomcat-lb.lab.invalid
+apache_httpd_firewall_ports: []
+apache_httpd_proxy_retry: 5          # lab: retry a stopped node quickly so the drill is short
+apache_httpd_proxy_route_header: true  # lab: show which node answered (the drill checks it)

@@ -1,0 +1,28 @@
+---
+# Example flat variables a calling app would send. Placeholders only - no secrets belong here.
+# pacemaker_cluster_password and the fence device credentials come from an AAP credential or a
+# Vault file passed with -e @vault.yml - never from this file.
+target_hosts: web_cluster
+run_baseline: false
+run_validation: true
+
+apache_ha_vip_address: 192.0.2.50     # reserved, unused address in the nodes' subnet (DNS points here)
+apache_ha_vip_cidr_netmask: 24
+apache_httpd_server_name: web.example.invalid
+apache_httpd_firewall_ports: ["80/tcp"]
+
+pacemaker_cluster_name: web_cluster
+pacemaker_cluster_enable_repos: []    # RHEL: HA repo comes from the Satellite content view
+pacemaker_cluster_firewall_services: [high-availability]
+
+# Fencing is required. Example for VMware - agent options per their platform:
+pacemaker_cluster_stonith_enabled: true
+pacemaker_cluster_fence_devices:
+  - name: fence_vcenter
+    agent: fence_vmware_rest
+    options:
+      ip: vcenter.example.invalid
+      username: "{{ vault_fence_user }}"
+      password: "{{ vault_fence_password }}"
+      ssl_insecure: "0"
+      pcmk_host_map: "webha01:webha01-vm;webha02:webha02-vm"

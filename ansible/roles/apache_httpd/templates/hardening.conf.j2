@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# No version banner, no TRACE, no server details on error pages.
+ServerTokens Prod
+ServerSignature Off
+TraceEnable Off
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>

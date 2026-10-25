@@ -1,0 +1,29 @@
+---
+- name: Assert the VIP is a plain IPv4 address with a valid prefix
+  ansible.builtin.assert:
+    that:
+      - apache_ha_vip_address | default('') is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+      - apache_ha_vip_cidr_netmask | int >= 1 and apache_ha_vip_cidr_netmask | int <= 32
+      - apache_ha_vip_nic == '' or apache_ha_vip_nic is match('^[A-Za-z0-9_.-]+$')
+    fail_msg: >-
+      apache_ha_vip_address (required) must be an IPv4 address, apache_ha_vip_cidr_netmask 1-32,
+      apache_ha_vip_nic empty or an interface name; got {{ apache_ha_vip_address | default('') }}/{{ apache_ha_vip_cidr_netmask }}
+    quiet: true
+
+# Primary addresses only: once running, the VIP is (correctly) a secondary address on one node.
+- name: Assert the VIP is not a node address
+  ansible.builtin.assert:
+    that: apache_ha_vip_address not in (ansible_play_hosts_all | map('extract', hostvars, ['ansible_facts', 'default_ipv4', 'address']) | list)
+    fail_msg: "apache_ha_vip_address {{ apache_ha_vip_address }} is already a node address - it must be a free, reserved address"
+    quiet: true
+  run_once: true
+
+- name: Assert resource names are plain and distinct
+  ansible.builtin.assert:
+    that:
+      - "[apache_ha_group, apache_ha_vip_resource, apache_ha_web_resource] | select('match', '^[A-Za-z0-9_-]+$') | list | length == 3"
+      - "[apache_ha_group, apache_ha_vip_resource, apache_ha_web_resource] | unique | length == 3"
+      - apache_ha_service_name is match('^[A-Za-z0-9_@.-]+$')
+      - apache_ha_monitor_interval is match('^[0-9]+(s|min)?$')
+    fail_msg: "Resource names must be distinct plain names, the service a unit name and the interval like 10s"
+    quiet: true

@@ -1,0 +1,25 @@
+---
+# Lab inventory for compose.yml. The control node (WSL / Linux with Docker) reaches the containers
+# directly on the lab network, so no port mapping is needed for SSH. Host key checking stays on:
+# run.sh records the keys of freshly built containers in ~/.ssh/known_hosts.
+all:
+  vars:
+    ansible_user: ansible   # non-root with sudo; the key comes from ~/.ssh / ssh-agent
+  children:
+    tomcat_standalone:
+      hosts:
+        tc1: {ansible_host: 172.30.0.11}
+    tomcat_nodes:
+      hosts:
+        tcha1: {ansible_host: 172.30.0.21}
+        tcha2: {ansible_host: 172.30.0.22}
+    tomcat_lb:
+      hosts:
+        tclb: {ansible_host: 172.30.0.20}
+    apache_standalone:
+      hosts:
+        ap1: {ansible_host: 172.30.0.31}
+    apache_ha:
+      hosts:
+        apha1: {ansible_host: 172.30.0.41}
+        apha2: {ansible_host: 172.30.0.42}

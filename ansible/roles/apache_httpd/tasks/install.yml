@@ -1,0 +1,20 @@
+---
+- name: Install httpd
+  ansible.builtin.dnf:
+    name: "{{ apache_httpd_packages }}"
+    state: present
+
+- name: Check whether httpd is installed
+  ansible.builtin.stat:
+    path: /etc/httpd/conf/httpd.conf
+  register: apache_httpd_conf_stat
+
+# In a plan on a host without httpd there is nothing on disk to configure or diff.
+- name: Note whether a plan can preview the configuration
+  ansible.builtin.set_fact:
+    apache_httpd_preview_blind: "{{ ansible_check_mode and not apache_httpd_conf_stat.stat.exists }}"
+
+- name: Show what a plan would configure
+  ansible.builtin.debug:
+    msg: "httpd is not installed yet: would install {{ apache_httpd_packages | join(', ') }}, then configure port {{ apache_httpd_listen_port }}"
+  when: apache_httpd_preview_blind | bool

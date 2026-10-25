@@ -1,0 +1,81 @@
+---
+- name: Assert a supported platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'RedHat'
+      - ansible_facts['distribution_major_version'] in ['8', '9']
+    fail_msg: >-
+      The pacemaker_cluster role supports RHEL 8 or 9 (and rebuilds); found
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_major_version'] }}
+    quiet: true
+
+# Every play host must be up: a cluster formed from a subset would silently lose a node.
+- name: Assert every play host is reachable
+  ansible.builtin.assert:
+    that: ansible_play_hosts | length == ansible_play_hosts_all | length
+    fail_msg: "Unreachable or failed hosts: {{ ansible_play_hosts_all | difference(ansible_play_hosts) }}"
+    quiet: true
+  run_once: true
+
+- name: Build the node list from the play hosts
+  ansible.builtin.set_fact:
+    pacemaker_cluster_node_list: >-
+      {%- if pacemaker_cluster_nodes | length > 0 -%}
+      {{ pacemaker_cluster_nodes }}
+      {%- else -%}
+      {%- set nodes = [] -%}
+      {%- for h in ansible_play_hosts_all -%}
+      {%- set _ = nodes.append({
+            'name': hostvars[h]['pacemaker_cluster_node_name'] | default(hostvars[h]['ansible_facts']['hostname']),
+            'addr': hostvars[h]['pacemaker_cluster_node_addr'] | default(hostvars[h]['ansible_facts']['default_ipv4']['address'])}) -%}
+      {%- endfor -%}
+      {{ nodes }}
+      {%- endif -%}
+
+- name: Assert the node list is usable
+  ansible.builtin.assert:
+    that:
+      - pacemaker_cluster_node_list | length >= 2
+      - >-
+        pacemaker_cluster_node_list | map(attribute='name') | select('match', '^[A-Za-z0-9][A-Za-z0-9.-]*$') | list | length
+        == pacemaker_cluster_node_list | length
+      - >-
+        pacemaker_cluster_node_list | map(attribute='addr') | select('match', '^[0-9]{1,3}(\.[0-9]{1,3}){3}$') | list | length
+        == pacemaker_cluster_node_list | length
+      - pacemaker_cluster_node_list | map(attribute='name') | unique | length == pacemaker_cluster_node_list | length
+    fail_msg: "Need 2+ nodes with unique plain names and IPv4 addresses, got {{ pacemaker_cluster_node_list }}"
+    quiet: true
+
+- name: Assert the cluster name is plain
+  ansible.builtin.assert:
+    that: pacemaker_cluster_name is match('^[A-Za-z0-9_-]{1,32}$')
+    fail_msg: "pacemaker_cluster_name must be 1-32 letters, digits, _ or -, got '{{ pacemaker_cluster_name }}'"
+    quiet: true
+
+- name: Assert the hacluster password is supplied
+  ansible.builtin.assert:
+    that: pacemaker_cluster_password | default('') | length >= 8
+    fail_msg: "pacemaker_cluster_password is required (8+ characters) - supply it from an AAP credential or Vault"
+    quiet: true
+
+- name: Assert a deliberate fencing decision
+  ansible.builtin.assert:
+    that: >-
+      (pacemaker_cluster_stonith_enabled | bool and pacemaker_cluster_fence_devices | length > 0) or
+      (not pacemaker_cluster_stonith_enabled | bool and pacemaker_cluster_allow_no_fencing | bool)
+    fail_msg: >-
+      Fencing: either list pacemaker_cluster_fence_devices (production), or set BOTH
+      pacemaker_cluster_stonith_enabled=false and pacemaker_cluster_allow_no_fencing=true (lab only).
+    quiet: true
+
+- name: Assert fence devices have plain names and agents
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[A-Za-z0-9_-]+$')
+      - item.agent is match('^fence_[a-z0-9_]+$')
+    fail_msg: "Bad fence device name/agent '{{ item.name | default('?') }}' / '{{ item.agent | default('?') }}'"
+    quiet: true
+  loop: "{{ pacemaker_cluster_fence_devices }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+  when: pacemaker_cluster_stonith_enabled | bool

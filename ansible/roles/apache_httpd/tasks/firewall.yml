@@ -1,0 +1,9 @@
+---
+# Nothing is opened unless the caller lists ports.
+- name: Open requested ports
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ apache_httpd_firewall_ports }}"

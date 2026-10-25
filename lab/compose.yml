@@ -1,0 +1,64 @@
+---
+# Local lab for the thin middleware playbooks: Rocky Linux 8 nodes (RHEL 8 rebuild) with systemd,
+# on a private network with fixed addresses so Pacemaker and the VIP behave as on real VMs.
+# Driven by run.sh; you rarely need to call compose yourself.
+#
+#   tc1            Tomcat standalone
+#   tcha1, tcha2   Tomcat HA nodes          tclb  Apache load balancer in front of them
+#   ap1            Apache standalone
+#   apha1, apha2   Apache HA (Pacemaker)    VIP 172.30.0.40
+#
+# Ports published to the host (also reachable from Windows via WSL localhost forwarding):
+#   ap1 -> 8180, tclb -> 8190, tc1 -> 8170
+x-node: &node
+  image: infralifecycle-lab:rocky8
+  privileged: true      # lab only: systemd + Pacemaker IPaddr2 need it
+  cgroup: host
+  restart: "no"
+  pull_policy: never    # built locally by the tc1 service
+
+services:
+  tc1:
+    <<: *node
+    build: {context: ., args: {ROCKY_VERSION: "8"}}
+    hostname: tc1
+    ports: ["8170:8080"]
+    networks: {lab: {ipv4_address: 172.30.0.11}}
+  tcha1:
+    <<: *node
+    hostname: tcha1
+    depends_on: [tc1]
+    networks: {lab: {ipv4_address: 172.30.0.21}}
+  tcha2:
+    <<: *node
+    hostname: tcha2
+    depends_on: [tc1]
+    networks: {lab: {ipv4_address: 172.30.0.22}}
+  tclb:
+    <<: *node
+    hostname: tclb
+    depends_on: [tc1]
+    ports: ["8190:80"]
+    networks: {lab: {ipv4_address: 172.30.0.20}}
+  ap1:
+    <<: *node
+    hostname: ap1
+    depends_on: [tc1]
+    ports: ["8180:80"]
+    networks: {lab: {ipv4_address: 172.30.0.31}}
+  apha1:
+    <<: *node
+    hostname: apha1
+    depends_on: [tc1]
+    networks: {lab: {ipv4_address: 172.30.0.41}}
+  apha2:
+    <<: *node
+    hostname: apha2
+    depends_on: [tc1]
+    networks: {lab: {ipv4_address: 172.30.0.42}}
+
+networks:
+  lab:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

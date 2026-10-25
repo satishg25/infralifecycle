@@ -1,0 +1,13 @@
+---
+# Example flat variables a calling app would send. Placeholders only - no secrets belong here.
+target_hosts: web_nodes
+run_baseline: false
+run_validation: true
+
+apache_httpd_server_name: web.example.invalid
+apache_httpd_listen_port: 80
+apache_httpd_firewall_ports: ["80/tcp"]
+# Optional: act as a reverse proxy / load balancer
+# apache_httpd_proxy_members:
+#   - {route: app1, url: "http://10.0.0.11:8080"}
+#   - {route: app2, url: "http://10.0.0.12:8080"}
