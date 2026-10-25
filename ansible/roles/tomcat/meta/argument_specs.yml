@@ -19,6 +19,7 @@ argument_specs:
       tomcat_bind_address: {type: str, default: ""}
       tomcat_http_port: {type: int, default: 8080}
       tomcat_firewall_ports: {type: list, elements: str}
+      tomcat_jvm_route: {type: str, default: ""}
       tomcat_remove_default_webapps: {type: bool}
       tomcat_auto_deploy: {type: bool}
       tomcat_java_opts: {type: str}

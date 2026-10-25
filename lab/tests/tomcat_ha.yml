@@ -1,0 +1,66 @@
+---
+# Lab failover drill (stops a service - lab only):
+#   a session cookie pins requests to its node -> stop Tomcat on the first node -> every request
+#   is still answered, by the other node -> start it again -> the balancer uses it again.
+- name: Tomcat HA failover drill
+  hosts: "{{ lb_hosts | default('tomcat_lb') }}"
+  become: true
+  gather_facts: false
+  vars:
+    drill_nodes: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('tomcat_nodes')) }}"
+    drill_victim: "{{ drill_nodes[0] }}"
+    drill_survivor: "{{ drill_nodes[1] }}"
+    drill_url: "http://127.0.0.1/{{ tomcat_health_context | default('health') }}/"
+  tasks:
+    - name: Send requests carrying a session pinned to the second node
+      ansible.builtin.uri:
+        url: "{{ drill_url }}"
+        headers:
+          Cookie: "JSESSIONID=LABSESSION.{{ hostvars[drill_survivor]['tomcat_jvm_route'] | default(drill_survivor) }}"
+      register: drill_sticky
+      loop: [1, 2, 3, 4]
+
+    - name: Assert the session stayed on its node
+      ansible.builtin.assert:
+        that: drill_sticky.results | map(attribute='x_backend_route') | unique == [drill_survivor]
+        fail_msg: "Sticky session not honoured: {{ drill_sticky.results | map(attribute='x_backend_route') | list }}"
+
+    - name: Stop Tomcat on the first node
+      ansible.builtin.systemd_service:
+        name: "{{ tomcat_service_name | default('tomcat') }}"
+        state: stopped
+      delegate_to: "{{ drill_victim }}"
+
+    - name: Send requests while it is down
+      ansible.builtin.uri:
+        url: "{{ drill_url }}"
+        return_content: true
+      register: drill_down
+      loop: [1, 2, 3, 4, 5, 6]
+
+    - name: Assert every request was answered by the surviving node
+      ansible.builtin.assert:
+        that:
+          - drill_down.results | map(attribute='content') | map('trim') | unique == ['OK']
+          - drill_down.results | map(attribute='x_backend_route') | unique == [drill_survivor]
+        fail_msg: "Failover failed: {{ drill_down.results | map(attribute='x_backend_route') | list }}"
+
+    - name: Start Tomcat on the first node again
+      ansible.builtin.systemd_service:
+        name: "{{ tomcat_service_name | default('tomcat') }}"
+        state: started
+      delegate_to: "{{ drill_victim }}"
+
+    - name: Wait until the balancer uses the first node again
+      ansible.builtin.uri:
+        url: "{{ drill_url }}"
+      register: drill_back
+      until: drill_back.x_backend_route | default('') == drill_victim
+      retries: 30
+      delay: 2
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          Failover OK: sticky session kept on {{ drill_survivor }}; with {{ drill_victim }} stopped
+          all requests went to {{ drill_survivor }}; {{ drill_victim }} rejoined

@@ -1,0 +1,54 @@
+---
+# Read each property, set it only when it differs (crm_attribute reads work on pcs 0.10 and 0.11).
+- name: Read cluster properties
+  ansible.builtin.command:
+    argv: [crm_attribute, --type, crm_config, --name, "{{ item.key }}", --query, --quiet]
+  register: pacemaker_cluster_props
+  changed_when: false
+  failed_when: false   # an unset property exits non-zero; it then differs from the wanted value
+  check_mode: false
+  run_once: true
+  loop: "{{ pacemaker_cluster_wanted_props | dict2items }}"
+  vars: &props
+    pacemaker_cluster_wanted_props:
+      stonith-enabled: "{{ pacemaker_cluster_stonith_enabled | bool | lower }}"
+      no-quorum-policy: "{{ pacemaker_cluster_no_quorum_policy }}"
+
+- name: Set cluster properties that differ
+  ansible.builtin.command:
+    argv: [pcs, property, set, "{{ item.item.key }}={{ item.item.value }}"]
+  changed_when: true
+  run_once: true
+  loop: "{{ pacemaker_cluster_props.results }}"
+  loop_control:
+    label: "{{ item.item.key }}={{ item.item.value }}"
+  when: item.stdout | trim != item.item.value
+  vars: *props
+
+- name: Check which fence devices exist
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ item.name }}", --query-xml]
+  register: pacemaker_cluster_fence_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop: "{{ pacemaker_cluster_fence_devices }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: pacemaker_cluster_stonith_enabled | bool
+
+# Fence options carry credentials: argv (no shell) and no_log.
+- name: Create missing fence devices
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pcs', 'stonith', 'create', item.item.name, item.item.agent]
+         + ((item.item.options | default({})).items() | map('join', '=') | list)
+         + ['op', 'monitor', 'interval=60s'] }}
+  changed_when: true
+  no_log: true
+  run_once: true
+  loop: "{{ pacemaker_cluster_fence_exists.results | default([]) }}"
+  when:
+    - pacemaker_cluster_stonith_enabled | bool
+    - item.rc | default(0) != 0

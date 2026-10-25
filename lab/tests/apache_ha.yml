@@ -1,0 +1,75 @@
+---
+# Lab failover drill (changes cluster state - lab only):
+#   put the active node in standby -> group moves -> VIP still answers -> bring the node back ->
+#   group stays where it is (stickiness).
+- name: Apache HA failover drill
+  hosts: "{{ target_hosts | default('apache_ha') }}"
+  become: true
+  gather_facts: false
+  vars:
+    drill_group: "{{ apache_ha_group | default('apache-group') }}"
+    drill_url: "http://{{ apache_ha_vip_address }}/{{ apache_httpd_health_context | default('health') }}/"
+  tasks:
+    - name: Locate the group
+      ansible.builtin.command: crm_resource --resource {{ drill_group }} --locate
+      register: drill_before
+      changed_when: false
+      run_once: true
+
+    - name: Note the active node
+      ansible.builtin.set_fact:
+        drill_active: "{{ drill_before.stdout | regex_search('running on: (\\S+)', '\\1') | first }}"
+      run_once: true
+
+    - name: Put the active node in standby
+      ansible.builtin.command: pcs node standby {{ drill_active }}
+      changed_when: true
+      run_once: true
+
+    - name: Wait for the group to run on another node
+      ansible.builtin.command: crm_resource --resource {{ drill_group }} --locate
+      register: drill_moved
+      changed_when: false
+      until:
+        - drill_moved.stdout is search('is running on')
+        - not (drill_moved.stdout | trim) is search(drill_active ~ '$')
+      retries: 24
+      delay: 5
+      run_once: true
+
+    - name: Check the VIP answers from the new node
+      ansible.builtin.uri:
+        url: "{{ drill_url }}"
+        return_content: true
+      register: drill_health
+      until: drill_health.status == 200 and drill_health.content | trim == 'OK'
+      retries: 12
+      delay: 5
+
+    - name: Bring the node back
+      ansible.builtin.command: pcs node unstandby {{ drill_active }}
+      changed_when: true
+      run_once: true
+
+    - name: Give the cluster time to (not) move the group back
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Locate the group again
+      ansible.builtin.command: crm_resource --resource {{ drill_group }} --locate
+      register: drill_after
+      changed_when: false
+      run_once: true
+
+    - name: Assert the group stayed on the new node (stickiness)
+      ansible.builtin.assert:
+        that: drill_after.stdout == drill_moved.stdout
+        fail_msg: "Group moved back after unstandby: before={{ drill_moved.stdout }} after={{ drill_after.stdout }}"
+      run_once: true
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          Failover OK: {{ drill_active }} -> {{ drill_after.stdout | regex_search('running on: (\S+)', '\1') | first }},
+          VIP answered throughout the drill
+      run_once: true

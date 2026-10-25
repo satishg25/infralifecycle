@@ -1,0 +1,71 @@
+---
+# Files only: every change is idempotent, shows up in --diff and notifies one reload. The package
+# ships httpd.conf with exactly one "Listen 80"; the role owns that line instead of adding a second
+# Listen elsewhere (two Listen lines for the same port stop httpd from starting).
+- name: Set the listener in httpd.conf
+  ansible.builtin.lineinfile:
+    path: /etc/httpd/conf/httpd.conf
+    regexp: '^Listen\s'
+    line: "Listen {{ (apache_httpd_listen_address ~ ':') if apache_httpd_listen_address else '' }}{{ apache_httpd_listen_port }}"
+  notify: Reload httpd
+
+- name: Write the hardening settings
+  ansible.builtin.template:
+    src: hardening.conf.j2
+    dest: /etc/httpd/conf.d/hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload httpd
+
+# Blanking (not deleting) survives package updates, which would restore a deleted file.
+- name: Disable the default welcome page
+  ansible.builtin.copy:
+    dest: /etc/httpd/conf.d/welcome.conf
+    content: "# Managed by Ansible (apache_httpd role) - default welcome page disabled\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: apache_httpd_remove_welcome_page | bool
+  notify: Reload httpd
+
+- name: Write the site
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: /etc/httpd/conf.d/site.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload httpd
+
+- name: Create the health directory
+  ansible.builtin.file:
+    path: "{{ apache_httpd_document_root }}/{{ apache_httpd_health_context }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the health page
+  ansible.builtin.copy:
+    dest: "{{ apache_httpd_document_root }}/{{ apache_httpd_health_context }}/index.html"
+    content: "OK\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+# SELinux blocks httpd from opening outbound connections unless this boolean is on.
+- name: Allow httpd to connect to proxy members (SELinux)
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
+  when:
+    - apache_httpd_proxy_members | length > 0
+    - ansible_facts['selinux']['status'] | default('disabled') == 'enabled'
+
+# A bad config fails the run here, before any reload, so the running server keeps its old config.
+- name: Check the configuration syntax
+  ansible.builtin.command: httpd -t
+  changed_when: false
+  when: not ansible_check_mode

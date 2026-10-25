@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ROLES = ["jboss", "tomcat", "validation", "rhel_baseline"]
+ROLES = ["jboss", "tomcat", "apache_httpd", "pacemaker_cluster", "apache_ha", "validation", "rhel_baseline"]
 PLAYBOOKS = {
-    "ansible/playbooks/thin/jboss_standalone.yml": "playbooks/jboss_standalone.yml",
-    "ansible/playbooks/thin/tomcat_standalone.yml": "playbooks/tomcat_standalone.yml",
+    f"ansible/playbooks/thin/{name}.yml": f"playbooks/{name}.yml"
+    for name in ("jboss_standalone", "tomcat_standalone", "tomcat_ha", "apache_standalone", "apache_ha")
 }
 FRAMEWORK_WORDS = ("capability_dispatch", "machine_resolve", "machine_spec", "machine_result", "profile_dir", "cap_cfg")
 
@@ -50,9 +50,15 @@ def main() -> int:
         (out / dst).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / src, out / dst)
     shutil.copytree(ROOT / "examples/baloise", out / "examples", dirs_exist_ok=True)
-    shutil.copy(ROOT / "examples/baloise/inventory.yml", out / "inventory.yml")
+    shutil.copytree(ROOT / "examples/thin", out / "examples", dirs_exist_ok=True)
+    shutil.copy(ROOT / "examples/thin/inventory.yml", out / "inventory.yml")
+    # The container lab travels with the code, so the receiving team can re-run every test.
+    shutil.copytree(ROOT / "lab", out / "lab", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".state", ".build", "__pycache__"))
     shutil.copy(ROOT / ".ansible-lint", out / ".ansible-lint")
-    shutil.copy(ROOT / "docs/BALOISE-HANDOVER.md", out / "README.md")
+    shutil.copy(ROOT / "docs/MIDDLEWARE-HANDOVER.md", out / "README.md")
+    (out / "docs").mkdir(exist_ok=True)
+    shutil.copy(ROOT / "docs/BALOISE-HANDOVER.md", out / "docs/jboss_standalone.md")
     (out / "ansible.cfg").write_text(CFG)
     (out / "requirements.yml").write_text(REQS)
     leaks = [str(p.relative_to(out)) for p in out.rglob("*.yml") if any(w in p.read_text() for w in FRAMEWORK_WORDS)]

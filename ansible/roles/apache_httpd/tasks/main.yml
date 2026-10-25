@@ -1,0 +1,25 @@
+---
+# Flow: assert -> install -> configure files -> start (or hand over to the cluster) -> firewall.
+# Configured through files only, so a plan (--check --diff) previews every config change.
+# Run the read-only checks separately with:  tasks_from: validate
+- name: Assert platform preconditions
+  ansible.builtin.import_tasks: assert.yml
+  tags: [apache_httpd, apache_httpd_assert]
+
+- name: Install httpd
+  ansible.builtin.import_tasks: install.yml
+  tags: [apache_httpd, apache_httpd_install]
+
+- name: Configure listener, site, hardening and health page
+  ansible.builtin.import_tasks: configure.yml
+  when: not (apache_httpd_preview_blind | default(false) | bool)   # a plan on a host without httpd has nothing to diff
+  tags: [apache_httpd, apache_httpd_configure]
+
+- name: Start the service, or leave it to the cluster
+  ansible.builtin.import_tasks: service.yml
+  when: not ansible_check_mode   # needs the installed package; a plan cannot preview it
+  tags: [apache_httpd, apache_httpd_service]
+
+- name: Open firewall ports requested by the caller
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [apache_httpd, apache_httpd_firewall]

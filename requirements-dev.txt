@@ -2,3 +2,4 @@ ansible-core==2.21.5
 ansible-lint==26.10.1
 jsonschema==4.26.0
 PyYAML==6.0.3
+passlib==1.7.4

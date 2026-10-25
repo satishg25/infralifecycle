@@ -1,0 +1,101 @@
+---
+# Thin entry point for a calling application (custom app / AAP job template): FLAT extra variables
+# in, no profile, no request file, no framework dependency. Assumes the VM already exists and is
+# in the inventory (their VM role or job runs first).
+#
+#   ansible-playbook playbooks/thin/apache_standalone.yml -i <inventory> -e @<vars file>
+#   (check mode / preview)   ... --check --diff
+#   (local lab)   lab/run.sh apache_standalone
+#
+# Contract - everything is optional unless marked:
+#   target_hosts                  inventory group or host pattern            (default: web_nodes)
+#   run_baseline                  also apply rhel_baseline                   (default: false)
+#   run_validation                run read-only Apache validation            (default: true)
+#   run_os_validation             also run the OS validation role + evidence (default: true; needs run_validation)
+#   rhel_baseline_ntp_servers     REQUIRED when run_baseline is true
+#   rhel_baseline_data_volumes    list of {role, device, vg, lv, mount, fs}; device must be /dev/disk/by-*
+#   apache_httpd_listen_address   empty (all addresses) or an IPv4 address
+#   apache_httpd_listen_port      1-65535                                    (default: 80)
+#   apache_httpd_server_name      host name                                  (default: the host FQDN)
+#   apache_httpd_firewall_ports   e.g. ["80/tcp"]                            (default: none)
+#   apache_httpd_proxy_members    list of {route, url} to run as a load balancer (default: none)
+#   (any other apache_httpd_* / rhel_baseline_* / validation_* role variable may also be passed)
+- name: Validate the inputs before touching any host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Check target_hosts is a plain inventory pattern
+      ansible.builtin.assert:
+        that: (target_hosts | default('web_nodes')) is match('^[A-Za-z0-9_.:*,&!-]+$')
+        fail_msg: "target_hosts must be a plain inventory group/host pattern (letters, digits and _ . : * , & ! -), got '{{ target_hosts | default('') }}'"
+        quiet: true
+
+    - name: Check the boolean switches
+      ansible.builtin.assert:
+        that:
+          - (run_baseline | default(false)) | string | lower in ['true', 'false']
+          - (run_validation | default(true)) | string | lower in ['true', 'false']
+          - (run_os_validation | default(true)) | string | lower in ['true', 'false']
+        fail_msg: "run_baseline, run_validation and run_os_validation must be true or false"
+        quiet: true
+
+    - name: Check the baseline has the values it cannot default
+      ansible.builtin.assert:
+        that: not (run_baseline | default(false) | bool) or (rhel_baseline_ntp_servers | default([])) | length > 0
+        fail_msg: "run_baseline is true, so rhel_baseline_ntp_servers is required (a non-empty list)"
+        quiet: true
+
+    - name: Check this is not a cluster-managed install
+      ansible.builtin.assert:
+        that: not (apache_httpd_cluster_managed | default(false) | bool)
+        fail_msg: "apache_httpd_cluster_managed is for the apache_ha playbook; this one starts httpd itself"
+        quiet: true
+
+- name: Apache httpd standalone
+  hosts: "{{ target_hosts | default('web_nodes') }}"
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Apply the OS baseline (only when asked - the VM role may already do this)
+      ansible.builtin.include_role:
+        name: rhel_baseline
+      when: run_baseline | default(false) | bool
+      tags: [baseline]
+
+    - name: Install and configure Apache httpd
+      ansible.builtin.include_role:
+        name: apache_httpd
+      tags: [apache_httpd]
+
+    - name: Build the expected mount list from the data volumes
+      ansible.builtin.set_fact:
+        thin_expected_mounts: "{{ (thin_expected_mounts | default([])) + [{'path': item.mount, 'fstype': item.fs}] }}"
+      loop: "{{ rhel_baseline_data_volumes | default([]) }}"
+      loop_control:
+        label: "{{ item.mount }}"
+      when:
+        - run_validation | default(true) | bool
+        - run_os_validation | default(true) | bool
+      tags: [validate]
+
+    - name: Read-only OS validation and evidence report
+      ansible.builtin.include_role:
+        name: validation
+      vars:
+        validation_expected_mounts: "{{ thin_expected_mounts | default([]) }}"
+      when:
+        - run_validation | default(true) | bool
+        - run_os_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]
+
+    - name: Read-only Apache validation
+      ansible.builtin.include_role:
+        name: apache_httpd
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]

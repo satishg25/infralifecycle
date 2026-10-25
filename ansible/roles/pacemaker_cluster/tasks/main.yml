@@ -1,0 +1,25 @@
+---
+# Flow: assert -> install -> firewall -> pcsd + auth -> cluster setup -> properties -> fencing.
+# Every cluster-wide step runs once (on the first play host) and checks state before it acts,
+# so a second run changes nothing. Run the read-only checks with:  tasks_from: validate
+- name: Assert inputs and build the node list
+  ansible.builtin.import_tasks: assert.yml
+  tags: [pacemaker_cluster, pacemaker_cluster_assert]
+
+- name: Install the cluster stack
+  ansible.builtin.import_tasks: install.yml
+  tags: [pacemaker_cluster, pacemaker_cluster_install]
+
+- name: Open the cluster ports
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [pacemaker_cluster, pacemaker_cluster_firewall]
+
+- name: Authenticate the nodes and form the cluster
+  ansible.builtin.import_tasks: cluster.yml
+  when: not (pacemaker_cluster_preview_blind | default(false) | bool)   # nothing to talk to in a plan on new hosts
+  tags: [pacemaker_cluster, pacemaker_cluster_setup]
+
+- name: Set cluster properties and fencing
+  ansible.builtin.import_tasks: properties.yml
+  when: not (pacemaker_cluster_preview_blind | default(false) | bool)
+  tags: [pacemaker_cluster, pacemaker_cluster_properties]

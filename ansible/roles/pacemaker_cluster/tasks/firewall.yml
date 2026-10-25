@@ -1,0 +1,9 @@
+---
+# pcsd (2224/tcp) and corosync (5404-5405/udp) - before authentication, which needs them open.
+- name: Open the cluster services
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ pacemaker_cluster_firewall_services }}"

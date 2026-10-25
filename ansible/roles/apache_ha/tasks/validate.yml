@@ -1,0 +1,49 @@
+---
+# Read-only. Use:  include_role: {name: apache_ha, tasks_from: validate}
+- name: Locate the group
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ apache_ha_group }}", --locate]
+  register: apache_ha_locate_check
+  changed_when: false
+  run_once: true
+
+- name: Assert the group runs on exactly one node
+  ansible.builtin.assert:
+    that: apache_ha_locate_check.stdout_lines | select('search', 'is running on') | list | length == 1
+    fail_msg: "{{ apache_ha_group }} is not running on exactly one node: {{ apache_ha_locate_check.stdout }}"
+    quiet: true
+  run_once: true
+
+- name: Read service states
+  ansible.builtin.service_facts:
+
+- name: Note whether httpd runs here
+  ansible.builtin.set_fact:
+    apache_ha_httpd_running: "{{ (ansible_facts['services'][apache_ha_service_name ~ '.service']['state'] | default('absent')) == 'running' }}"
+
+- name: Assert httpd runs on exactly one node
+  ansible.builtin.assert:
+    that: ansible_play_hosts | map('extract', hostvars, 'apache_ha_httpd_running') | select | list | length == 1
+    fail_msg: >-
+      httpd must run on exactly one node, found it running on
+      {{ ansible_play_hosts | zip(ansible_play_hosts | map('extract', hostvars, 'apache_ha_httpd_running'))
+         | selectattr(1) | map('first') | list }}
+    quiet: true
+  run_once: true
+
+# From every node, so a VIP that only answers locally is caught.
+- name: Query the health page through the VIP
+  ansible.builtin.uri:
+    url: "{{ apache_ha_health_url }}"
+    return_content: true
+    status_code: 200
+  register: apache_ha_health
+  until: apache_ha_health.status == 200
+  retries: 12
+  delay: 5
+
+- name: Assert the VIP answers OK
+  ansible.builtin.assert:
+    that: (apache_ha_health.content | default('') | trim) == 'OK'
+    fail_msg: "VIP health page did not answer OK: {{ apache_ha_health.content | default('') }}"
+    quiet: true

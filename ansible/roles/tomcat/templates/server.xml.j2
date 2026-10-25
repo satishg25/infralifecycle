@@ -21,7 +21,7 @@
                connectionTimeout="20000"
                maxParameterCount="1000" />
 
-    <Engine name="Catalina" defaultHost="localhost">
+    <Engine name="Catalina" defaultHost="localhost"{% if tomcat_jvm_route %} jvmRoute="{{ tomcat_jvm_route }}"{% endif %}>
       <Realm className="org.apache.catalina.realm.LockOutRealm">
         <Realm className="org.apache.catalina.realm.UserDatabaseRealm" resourceName="UserDatabase" />
       </Realm>

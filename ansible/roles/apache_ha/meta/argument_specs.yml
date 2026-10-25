@@ -1,0 +1,21 @@
+---
+argument_specs:
+  main:
+    short_description: Pacemaker resources for active/passive Apache httpd - floating IP plus httpd in one group
+    options: &opts
+      apache_ha_group: {type: str}
+      apache_ha_vip_resource: {type: str}
+      apache_ha_web_resource: {type: str}
+      apache_ha_vip_address: {type: str, required: true}
+      apache_ha_vip_cidr_netmask: {type: int}
+      apache_ha_vip_nic: {type: str}
+      apache_ha_service_name: {type: str}
+      apache_ha_monitor_interval: {type: str}
+      apache_ha_resource_stickiness: {type: int}
+      apache_ha_http_port: {type: int}
+      apache_ha_health_context: {type: str}
+      apache_ha_health_url: {type: str}
+      apache_ha_start_timeout: {type: int}
+  validate:
+    short_description: Read-only checks - group running on exactly one node, httpd only there, health OK through the VIP
+    options: *opts

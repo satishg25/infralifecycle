@@ -1,0 +1,31 @@
+---
+argument_specs:
+  main:
+    short_description: Form a Pacemaker/Corosync cluster with pcs on RHEL 8/9 (auth, setup, properties, fencing)
+    options: &opts
+      pacemaker_cluster_name: {type: str}
+      pacemaker_cluster_nodes:
+        type: list
+        elements: dict
+        options:
+          name: {type: str, required: true}
+          addr: {type: str, required: true}
+      pacemaker_cluster_packages: {type: list, elements: str}
+      pacemaker_cluster_enable_repos: {type: list, elements: str}
+      pacemaker_cluster_user: {type: str}
+      pacemaker_cluster_password: {type: str, no_log: true}
+      pacemaker_cluster_stonith_enabled: {type: bool}
+      pacemaker_cluster_allow_no_fencing: {type: bool}
+      pacemaker_cluster_fence_devices:
+        type: list
+        elements: dict
+        options:
+          name: {type: str, required: true}
+          agent: {type: str, required: true}
+          options: {type: dict}
+      pacemaker_cluster_no_quorum_policy: {type: str, choices: [stop, freeze, ignore, demote, suicide]}
+      pacemaker_cluster_firewall_services: {type: list, elements: str}
+      pacemaker_cluster_start_timeout: {type: int}
+  validate:
+    short_description: Read-only checks - quorum, every node a member, fencing as decided
+    options: *opts

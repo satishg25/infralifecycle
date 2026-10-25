@@ -1,0 +1,56 @@
+---
+# All cluster-wide steps run on the first play host; pcs pushes the result to the other nodes.
+- name: Read which nodes this node already trusts
+  ansible.builtin.slurp:
+    src: /var/lib/pcsd/known-hosts
+  register: pacemaker_cluster_known_hosts
+  failed_when: false
+  run_once: true
+
+- name: Work out which nodes still need authenticating
+  ansible.builtin.set_fact:
+    pacemaker_cluster_unauthenticated: >-
+      {{ pacemaker_cluster_node_list | map(attribute='name')
+         | difference(((pacemaker_cluster_known_hosts.content | default('') | b64decode | default('{}', true) | from_json)
+                       ['known_hosts'] | default({})).keys() | list) }}
+  run_once: true
+
+# The password goes in on stdin, so it never appears in a process list or the job log.
+- name: Authenticate the nodes to pcsd
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pcs', 'host', 'auth'] + (pacemaker_cluster_node_list | map(attribute='name')
+         | zip(pacemaker_cluster_node_list | map(attribute='addr') | map('regex_replace', '^', 'addr='))
+         | flatten) + ['-u', pacemaker_cluster_user] }}
+    stdin: "{{ pacemaker_cluster_password }}"
+  no_log: true
+  changed_when: true
+  run_once: true
+  when: pacemaker_cluster_unauthenticated | length > 0
+
+- name: Check whether the cluster already exists
+  ansible.builtin.stat:
+    path: /etc/corosync/corosync.conf
+  register: pacemaker_cluster_conf_stat
+  run_once: true
+
+- name: Create, enable and start the cluster
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pcs', 'cluster', 'setup', pacemaker_cluster_name] + (pacemaker_cluster_node_list | map(attribute='name')
+         | zip(pacemaker_cluster_node_list | map(attribute='addr') | map('regex_replace', '^', 'addr='))
+         | flatten) + ['--start', '--enable', '--wait=' ~ pacemaker_cluster_start_timeout] }}
+  changed_when: true
+  run_once: true
+  when: not pacemaker_cluster_conf_stat.stat.exists
+
+# After a reboot (or a container restart) the cluster may still be starting.
+- name: Wait for the cluster to have quorum
+  ansible.builtin.command: crm_node -q
+  register: pacemaker_cluster_quorum
+  changed_when: false
+  check_mode: false
+  until: pacemaker_cluster_quorum.stdout | trim == '1'
+  retries: "{{ (pacemaker_cluster_start_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  run_once: true

@@ -1,0 +1,23 @@
+---
+# Pacemaker resources for an active/passive Apache: one group = floating IP, then httpd.
+# The group starts the VIP first and httpd second on the same node, and stops them in reverse.
+apache_ha_group: apache-group
+apache_ha_vip_resource: apache-vip
+apache_ha_web_resource: apache-web
+
+# --- Floating IP (required) ------------------------------------------------------------------
+# apache_ha_vip_address: (required, no default) - a reserved, unused address in the node subnet
+apache_ha_vip_cidr_netmask: 24
+apache_ha_vip_nic: ""                 # empty = the NIC that already has an address in that subnet
+
+# --- Service and monitoring ----------------------------------------------------------------
+apache_ha_service_name: httpd
+apache_ha_monitor_interval: 10s
+# Stay where it runs after a failover, instead of moving back when the failed node returns.
+apache_ha_resource_stickiness: 100
+
+# --- Health through the VIP ----------------------------------------------------------------
+apache_ha_http_port: "{{ apache_httpd_listen_port | default(80) }}"
+apache_ha_health_context: "{{ apache_httpd_health_context | default('health') }}"
+apache_ha_health_url: "http://{{ apache_ha_vip_address | default('') }}:{{ apache_ha_http_port }}/{{ apache_ha_health_context }}/"
+apache_ha_start_timeout: 120

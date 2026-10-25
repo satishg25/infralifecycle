@@ -1,0 +1,16 @@
+---
+# Example flat variables a calling app would send. Placeholders only - no secrets belong here.
+target_hosts: tomcat_nodes
+lb_hosts: tomcat_lb
+run_load_balancer: true      # false when the platform load balancer (F5, NetScaler, ...) is used
+run_baseline: false
+run_validation: true
+
+tomcat_install_source: archive
+# tomcat_bind_address / tomcat_jvm_route default per node to its primary IPv4 / short name.
+tomcat_firewall_ports: ["8080/tcp"]   # the balancer must reach the nodes
+
+apache_httpd_server_name: app.example.invalid
+apache_httpd_firewall_ports: ["80/tcp"]
+apache_httpd_proxy_path: /
+apache_httpd_proxy_retry: 30

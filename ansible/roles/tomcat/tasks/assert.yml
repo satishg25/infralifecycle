@@ -44,6 +44,12 @@
     fail_msg: "tomcat_health_context must be letters, digits, _ or -, got '{{ tomcat_health_context }}'"
     quiet: true
 
+- name: Assert the jvmRoute, if set, is a plain name
+  ansible.builtin.assert:
+    that: tomcat_jvm_route == '' or tomcat_jvm_route is match('^[A-Za-z0-9_-]+$')
+    fail_msg: "tomcat_jvm_route must be empty or letters, digits, _ or -, got '{{ tomcat_jvm_route }}'"
+    quiet: true
+
 - name: Assert firewall ports look like port/proto
   ansible.builtin.assert:
     that: item is match('^[0-9]{1,5}/(tcp|udp)$')

@@ -1,0 +1,40 @@
+---
+# --- Package and service (RHEL AppStream httpd 2.4) ------------------------------------------
+apache_httpd_packages: [httpd]
+apache_httpd_service_name: httpd
+
+# --- Who starts the service ----------------------------------------------------------------
+# false: this role enables and starts httpd (standalone, or a load balancer node).
+# true : a cluster (Pacemaker, see the apache_ha role) owns start/stop. The role installs and
+#        configures on every node but leaves the unit disabled, and only reloads it where it runs.
+apache_httpd_cluster_managed: false
+
+# --- Listener ------------------------------------------------------------------------------
+# Empty address = all addresses (a web server is meant to be reachable; the firewall decides).
+apache_httpd_listen_address: ""
+apache_httpd_listen_port: 80
+apache_httpd_server_name: "{{ ansible_facts['fqdn'] }}"
+apache_httpd_document_root: /var/www/html
+apache_httpd_firewall_ports: []        # e.g. ["80/tcp"]; nothing opens unless asked
+
+# --- Hardening -----------------------------------------------------------------------------
+apache_httpd_remove_welcome_page: true # blank conf.d/welcome.conf (the RHEL-documented way)
+
+# --- Reverse proxy / load balancer (optional) ----------------------------------------------
+# Empty = plain web server. Otherwise a list of {route, url}: requests under
+# apache_httpd_proxy_path are balanced over the members, sticky on the session cookie whose
+# suffix is the member's route (Tomcat: route == jvmRoute). A member that refuses connections is
+# skipped and retried after apache_httpd_proxy_retry seconds.
+apache_httpd_proxy_members: []         # e.g. [{route: node1, url: "http://10.0.0.11:8080"}]
+apache_httpd_proxy_path: /
+apache_httpd_proxy_sticky_cookie: JSESSIONID
+apache_httpd_proxy_retry: 30
+apache_httpd_proxy_route_header: false # add X-Backend-Route to responses (lab/diagnostics only)
+
+# --- Health --------------------------------------------------------------------------------
+# A one-file static page the role owns (never proxied), so validation needs no application.
+apache_httpd_health_context: health
+apache_httpd_health_url: >-
+  http://{{ (apache_httpd_listen_address in ['', '0.0.0.0']) | ternary('127.0.0.1', apache_httpd_listen_address) }}:{{
+  apache_httpd_listen_port }}/{{ apache_httpd_health_context }}/
+apache_httpd_start_timeout: 60

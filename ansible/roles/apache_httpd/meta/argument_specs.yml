@@ -1,0 +1,30 @@
+---
+argument_specs:
+  main:
+    short_description: Install and harden Apache httpd 2.4 as a web server or load balancer, standalone or cluster-managed
+    options: &opts
+      apache_httpd_packages: {type: list, elements: str}
+      apache_httpd_service_name: {type: str, default: httpd}
+      apache_httpd_cluster_managed: {type: bool, default: false}
+      apache_httpd_listen_address: {type: str, default: ""}
+      apache_httpd_listen_port: {type: int, default: 80}
+      apache_httpd_server_name: {type: str}
+      apache_httpd_document_root: {type: path}
+      apache_httpd_firewall_ports: {type: list, elements: str}
+      apache_httpd_remove_welcome_page: {type: bool}
+      apache_httpd_proxy_members:
+        type: list
+        elements: dict
+        options:
+          route: {type: str, required: true}
+          url: {type: str, required: true}
+      apache_httpd_proxy_path: {type: str}
+      apache_httpd_proxy_sticky_cookie: {type: str}
+      apache_httpd_proxy_retry: {type: int}
+      apache_httpd_proxy_route_header: {type: bool}
+      apache_httpd_health_context: {type: str}
+      apache_httpd_health_url: {type: str}
+      apache_httpd_start_timeout: {type: int}
+  validate:
+    short_description: Read-only checks - config syntax, service ownership, health, banner, TRACE, listener, workers
+    options: *opts

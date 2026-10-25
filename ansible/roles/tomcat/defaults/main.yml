@@ -39,6 +39,11 @@ tomcat_firewall_ports: []              # e.g. ["8080/tcp"]; nothing opens unless
 tomcat_remove_default_webapps: true    # ROOT, docs, examples, manager, host-manager
 tomcat_auto_deploy: false              # deploy at start-up only; no hot deploy from webapps/
 
+# --- Behind a load balancer ----------------------------------------------------------------
+# Empty for a standalone node. Behind a sticky load balancer, a unique name per node: Tomcat
+# appends it to the session id (JSESSIONID=<id>.<route>) so the balancer keeps a session on it.
+tomcat_jvm_route: ""
+
 # --- JVM -----------------------------------------------------------------------------------
 tomcat_java_opts: "-Xms256m -Xmx512m"
 

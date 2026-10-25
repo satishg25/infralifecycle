@@ -1,0 +1,43 @@
+---
+- name: Install the cluster packages
+  ansible.builtin.dnf:
+    name: "{{ pacemaker_cluster_packages }}"
+    enablerepo: "{{ pacemaker_cluster_enable_repos }}"
+    state: present
+
+- name: Check whether pcs is installed
+  ansible.builtin.stat:
+    path: /usr/sbin/pcs
+  register: pacemaker_cluster_pcs_stat
+
+# In a plan on hosts without pcs there is no daemon to authenticate against or cluster to read.
+- name: Note whether a plan can preview the cluster
+  ansible.builtin.set_fact:
+    pacemaker_cluster_preview_blind: "{{ ansible_check_mode and not pacemaker_cluster_pcs_stat.stat.exists }}"
+
+- name: Show what a plan would do
+  ansible.builtin.debug:
+    msg: >-
+      pcs is not installed yet: would install {{ pacemaker_cluster_packages | join(', ') }}, then form cluster
+      {{ pacemaker_cluster_name }} from {{ pacemaker_cluster_node_list | map(attribute='name') | join(', ') }}
+  when: pacemaker_cluster_preview_blind | bool
+  run_once: true
+
+# Salt derived from the host and cluster name: same password -> same hash -> no change on rerun,
+# while a new password (rotation) still applies.
+- name: Set the hacluster password
+  ansible.builtin.user:
+    name: "{{ pacemaker_cluster_user }}"
+    password: >-
+      {{ pacemaker_cluster_password | password_hash('sha512',
+         (inventory_hostname ~ pacemaker_cluster_name) | hash('sha256') | truncate(16, true, '')) }}
+    update_password: always
+  no_log: true
+  when: not pacemaker_cluster_preview_blind | bool
+
+- name: Enable and start pcsd
+  ansible.builtin.systemd_service:
+    name: pcsd
+    state: started
+    enabled: true
+  when: not pacemaker_cluster_preview_blind | bool

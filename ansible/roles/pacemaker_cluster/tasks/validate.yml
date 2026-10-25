@@ -1,0 +1,61 @@
+---
+# Read-only. Use:  include_role: {name: pacemaker_cluster, tasks_from: validate}
+- name: Read quorum
+  ansible.builtin.command: crm_node -q
+  register: pacemaker_cluster_quorum_check
+  changed_when: false
+
+- name: Assert this node is in a quorate partition
+  ansible.builtin.assert:
+    that: pacemaker_cluster_quorum_check.stdout | trim == '1'
+    fail_msg: "{{ inventory_hostname }} has no quorum"
+    quiet: true
+
+# 'crm_node -l' lines: <id> <name> <state>
+- name: List cluster members
+  ansible.builtin.command: crm_node -l
+  register: pacemaker_cluster_members
+  changed_when: false
+  run_once: true
+
+- name: Assert every node is a member
+  ansible.builtin.assert:
+    that:
+      - pacemaker_cluster_members.stdout_lines | map('split') | selectattr(2, 'equalto', 'member') | list | length >= 2
+      - >-
+        pacemaker_cluster_node_list | default(pacemaker_cluster_nodes) | map(attribute='name')
+        | difference(pacemaker_cluster_members.stdout_lines | map('split') | selectattr(2, 'equalto', 'member')
+                     | map(attribute=1) | list) | length == 0
+    fail_msg: "Not every node is a member: {{ pacemaker_cluster_members.stdout_lines }}"
+    quiet: true
+  run_once: true
+
+- name: Read the fencing property
+  ansible.builtin.command:
+    argv: [crm_attribute, --type, crm_config, --name, stonith-enabled, --query, --quiet]
+  register: pacemaker_cluster_stonith_check
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: Assert fencing is as decided
+  ansible.builtin.assert:
+    that: (pacemaker_cluster_stonith_check.stdout | trim | default('true', true)) == (pacemaker_cluster_stonith_enabled | bool | lower)
+    fail_msg: "stonith-enabled is '{{ pacemaker_cluster_stonith_check.stdout | trim }}', expected {{ pacemaker_cluster_stonith_enabled | bool | lower }}"
+    quiet: true
+  run_once: true
+
+- name: List fence devices
+  ansible.builtin.command: stonith_admin --list-registered
+  register: pacemaker_cluster_fence_list
+  changed_when: false
+  run_once: true
+  when: pacemaker_cluster_stonith_enabled | bool
+
+- name: Assert every fence device is registered
+  ansible.builtin.assert:
+    that: pacemaker_cluster_fence_devices | map(attribute='name') | difference(pacemaker_cluster_fence_list.stdout_lines | map('trim') | list) | length == 0
+    fail_msg: "Fence devices missing: {{ pacemaker_cluster_fence_list.stdout_lines }}"
+    quiet: true
+  run_once: true
+  when: pacemaker_cluster_stonith_enabled | bool

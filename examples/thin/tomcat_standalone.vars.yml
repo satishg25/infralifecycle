@@ -1,0 +1,11 @@
+---
+# Example flat variables a calling app would send. Placeholders only - no secrets belong here.
+target_hosts: middleware_nodes
+run_baseline: false          # set true only if their VM role does not already apply a baseline
+run_validation: true
+
+tomcat_install_source: archive
+# Point at the internal artifact repo; the sha512 must match what is served there.
+# tomcat_archive_url: https://artifacts.example.invalid/tomcat/apache-tomcat-10.1.60.tar.gz
+tomcat_bind_address: ""      # empty = loopback only (behind a local proxy); else the host IPv4
+tomcat_firewall_ports: []    # e.g. ["8080/tcp"] when tomcat_bind_address is set

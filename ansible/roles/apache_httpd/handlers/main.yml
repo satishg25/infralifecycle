@@ -1,0 +1,17 @@
+---
+# A reload is graceful (in-flight requests finish) and re-reads Listen as well. On a stopped
+# standalone host "reloaded" starts the unit, which is what a first run needs.
+- name: Reload httpd
+  ansible.builtin.systemd_service:
+    name: "{{ apache_httpd_service_name }}"
+    state: reloaded
+  when: not apache_httpd_cluster_managed | bool
+  listen: Reload httpd
+
+# Cluster-managed: reload only where the cluster runs it; never start it here. The systemd module
+# has no "reload only if running", hence systemctl.
+- name: Reload httpd where the cluster runs it
+  ansible.builtin.command: "systemctl try-reload-or-restart {{ apache_httpd_service_name }}"  # noqa: command-instead-of-module
+  changed_when: true
+  when: apache_httpd_cluster_managed | bool
+  listen: Reload httpd

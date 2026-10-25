@@ -1,0 +1,78 @@
+---
+- name: Assert a supported platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'RedHat'
+      - ansible_facts['distribution_major_version'] in ['8', '9']
+    fail_msg: >-
+      The apache_httpd role supports RHEL 8 or 9 (and rebuilds); found
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_major_version'] }}
+    quiet: true
+
+- name: Assert the listen address, if set, is a plain IPv4 address
+  ansible.builtin.assert:
+    that: apache_httpd_listen_address == '' or apache_httpd_listen_address is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+    fail_msg: "apache_httpd_listen_address must be empty or an IPv4 address, got '{{ apache_httpd_listen_address }}'"
+    quiet: true
+
+- name: Assert the listen port is valid
+  ansible.builtin.assert:
+    that: apache_httpd_listen_port | int >= 1 and apache_httpd_listen_port | int <= 65535
+    fail_msg: "apache_httpd_listen_port must be 1-65535, got {{ apache_httpd_listen_port }}"
+    quiet: true
+
+- name: Assert the health context is a plain name
+  ansible.builtin.assert:
+    that: apache_httpd_health_context is match('^[A-Za-z0-9_-]+$')
+    fail_msg: "apache_httpd_health_context must be letters, digits, _ or -, got '{{ apache_httpd_health_context }}'"
+    quiet: true
+
+- name: Assert the document root is an absolute path without spaces or quotes
+  ansible.builtin.assert:
+    that: apache_httpd_document_root is match('^/[A-Za-z0-9_./-]*$')
+    fail_msg: "apache_httpd_document_root must be an absolute plain path, got '{{ apache_httpd_document_root }}'"
+    quiet: true
+
+- name: Assert the server name is a plain host name
+  ansible.builtin.assert:
+    that: apache_httpd_server_name is match('^[A-Za-z0-9.-]+$')
+    fail_msg: "apache_httpd_server_name must be a host name, got '{{ apache_httpd_server_name }}'"
+    quiet: true
+
+- name: Assert firewall ports look like port/proto
+  ansible.builtin.assert:
+    that: item is match('^[0-9]{1,5}/(tcp|udp)$')
+    fail_msg: "Bad firewall port '{{ item }}' - expected e.g. 80/tcp"
+    quiet: true
+  loop: "{{ apache_httpd_firewall_ports }}"
+
+# Values below are written into the config file, so they are held to strict patterns.
+- name: Assert the proxy settings are well formed
+  ansible.builtin.assert:
+    that:
+      - apache_httpd_proxy_path is match('^/([A-Za-z0-9_.-]+/)*$')
+      - apache_httpd_proxy_path != '/' ~ apache_httpd_health_context ~ '/'
+      - apache_httpd_proxy_sticky_cookie is match('^[A-Za-z0-9_]+$')
+      - apache_httpd_proxy_retry | int >= 0
+    fail_msg: >-
+      apache_httpd_proxy_path must look like / or /app/ (and differ from the health page),
+      apache_httpd_proxy_sticky_cookie must be a plain cookie name, apache_httpd_proxy_retry >= 0
+    quiet: true
+  when: apache_httpd_proxy_members | length > 0
+
+- name: Assert each proxy member has a plain route and an http(s) URL
+  ansible.builtin.assert:
+    that:
+      - item.route is match('^[A-Za-z0-9_-]+$')
+      - item.url is match('^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$')
+    fail_msg: "Bad proxy member {{ item }} - expected {route: node1, url: 'http://10.0.0.11:8080'} (no path)"
+    quiet: true
+  loop: "{{ apache_httpd_proxy_members }}"
+  loop_control:
+    label: "{{ item.route | default('?') }}"
+
+- name: Assert proxy member routes are unique
+  ansible.builtin.assert:
+    that: apache_httpd_proxy_members | map(attribute='route') | unique | length == apache_httpd_proxy_members | length
+    fail_msg: "apache_httpd_proxy_members routes must be unique (they pin sticky sessions)"
+    quiet: true

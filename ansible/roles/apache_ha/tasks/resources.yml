@@ -1,0 +1,99 @@
+---
+# Reads use crm_resource (same output on RHEL 8 pcs 0.10 and RHEL 9 pcs 0.11); writes use pcs.
+- name: Check which resources exist
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ item }}", --query-xml]
+  register: apache_ha_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop: ["{{ apache_ha_vip_resource }}", "{{ apache_ha_web_resource }}"]
+
+- name: Note which resources exist
+  ansible.builtin.set_fact:
+    apache_ha_vip_exists: "{{ apache_ha_exists.results[0].rc == 0 }}"
+    apache_ha_web_exists: "{{ apache_ha_exists.results[1].rc == 0 }}"
+    apache_ha_vip_params: >-
+      {{ {'ip': apache_ha_vip_address, 'cidr_netmask': apache_ha_vip_cidr_netmask | string}
+         | combine({'nic': apache_ha_vip_nic} if apache_ha_vip_nic else {}) }}
+  run_once: true
+
+- name: Create the floating IP (first in the group)
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pcs', 'resource', 'create', apache_ha_vip_resource, 'ocf:heartbeat:IPaddr2']
+         + (apache_ha_vip_params.items() | map('join', '=') | list)
+         + ['op', 'monitor', 'interval=' ~ apache_ha_monitor_interval, '--group', apache_ha_group] }}
+  changed_when: true
+  run_once: true
+  when: not apache_ha_vip_exists | bool
+
+# Drift: someone changed the VIP by hand, or the caller moved it. Correct each parameter.
+- name: Read the floating IP parameters
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ apache_ha_vip_resource }}", --get-parameter, "{{ item.key }}"]
+  register: apache_ha_vip_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop: "{{ apache_ha_vip_params | dict2items }}"
+  when: apache_ha_vip_exists | bool
+
+- name: Correct floating IP parameters that differ
+  ansible.builtin.command:
+    argv: [pcs, resource, update, "{{ apache_ha_vip_resource }}", "{{ item.item.key }}={{ item.item.value }}"]
+  changed_when: true
+  run_once: true
+  loop: "{{ apache_ha_vip_current.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.key | default('') }}"
+  when:
+    - apache_ha_vip_exists | bool
+    - item.stdout | default('') | trim != item.item.value | string
+
+- name: Create the httpd resource (after the IP in the group)
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - create
+      - "{{ apache_ha_web_resource }}"
+      - "systemd:{{ apache_ha_service_name }}"
+      - op
+      - monitor
+      - "interval={{ apache_ha_monitor_interval }}"
+      - --group
+      - "{{ apache_ha_group }}"
+  changed_when: true
+  run_once: true
+  when: not apache_ha_web_exists | bool
+
+- name: Read the group stickiness
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ apache_ha_group }}", --meta, --get-parameter, resource-stickiness]
+  register: apache_ha_stickiness
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Set the group stickiness
+  ansible.builtin.command:
+    argv: [pcs, resource, meta, "{{ apache_ha_group }}", "resource-stickiness={{ apache_ha_resource_stickiness }}"]
+  changed_when: true
+  run_once: true
+  when: apache_ha_stickiness.stdout | default('') | trim != apache_ha_resource_stickiness | string
+
+- name: Wait until the group runs on a node
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ apache_ha_group }}", --locate]
+  register: apache_ha_locate
+  changed_when: false
+  check_mode: false
+  until: apache_ha_locate.stdout is search('is running on')
+  retries: "{{ (apache_ha_start_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  run_once: true
+  when: not ansible_check_mode

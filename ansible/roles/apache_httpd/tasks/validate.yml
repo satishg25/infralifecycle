@@ -1,0 +1,102 @@
+---
+# Read-only. Use:  include_role: {name: apache_httpd, tasks_from: validate}
+# Cluster-managed nodes: the HTTP checks run only where the cluster currently runs httpd
+# (apache_ha validates the service through the VIP).
+- name: Check the configuration syntax
+  ansible.builtin.command: httpd -t
+  changed_when: false
+
+- name: Read service states
+  ansible.builtin.service_facts:
+
+- name: Note whether httpd runs here
+  ansible.builtin.set_fact:
+    apache_httpd_running: >-
+      {{ (ansible_facts['services'][apache_httpd_service_name ~ '.service']['state'] | default('absent')) == 'running' }}
+    apache_httpd_boot_enabled: >-
+      {{ (ansible_facts['services'][apache_httpd_service_name ~ '.service']['status'] | default('absent')) == 'enabled' }}
+
+- name: Assert standalone httpd is running and enabled at boot
+  ansible.builtin.assert:
+    that:
+      - apache_httpd_running | bool
+      - apache_httpd_boot_enabled | bool
+    fail_msg: "{{ apache_httpd_service_name }} must be running and enabled (running={{ apache_httpd_running }}, enabled={{ apache_httpd_boot_enabled }})"
+    quiet: true
+  when: not apache_httpd_cluster_managed | bool
+
+- name: Assert cluster-managed httpd is not enabled at boot
+  ansible.builtin.assert:
+    that: not apache_httpd_boot_enabled | bool
+    fail_msg: "{{ apache_httpd_service_name }} is enabled at boot, but the cluster must be the only thing that starts it"
+    quiet: true
+  when: apache_httpd_cluster_managed | bool
+
+- name: Query the health page
+  ansible.builtin.uri:
+    url: "{{ apache_httpd_health_url }}"
+    return_content: true
+    status_code: 200
+  register: apache_httpd_health
+  until: apache_httpd_health.status == 200
+  retries: 12
+  delay: 5
+  when: apache_httpd_running | bool
+
+- name: Assert the health page answers OK without a version banner
+  ansible.builtin.assert:
+    that:
+      - (apache_httpd_health.content | default('') | trim) == 'OK'
+      - (apache_httpd_health.server | default('')) == 'Apache'
+    fail_msg: >-
+      Health page or banner wrong: content='{{ apache_httpd_health.content | default('') | trim }}',
+      Server='{{ apache_httpd_health.server | default('') }}' (expected OK and plain 'Apache')
+    quiet: true
+  when: apache_httpd_running | bool
+
+- name: Send a TRACE request
+  ansible.builtin.uri:
+    url: "{{ apache_httpd_health_url }}"
+    method: TRACE
+    status_code: [405]
+  when: apache_httpd_running | bool
+
+- name: List listeners on the HTTP port
+  ansible.builtin.command: "ss -H -ltn 'sport = :{{ apache_httpd_listen_port }}'"
+  register: apache_httpd_listeners
+  changed_when: false
+  when: apache_httpd_running | bool
+
+- name: Assert httpd listens on the port
+  ansible.builtin.assert:
+    that: apache_httpd_listeners.stdout_lines | length > 0
+    fail_msg: "Nothing listens on port {{ apache_httpd_listen_port }}"
+    quiet: true
+  when: apache_httpd_running | bool
+
+# The parent process is root (it binds the port); request-serving workers must not be.
+- name: List the httpd process owners
+  ansible.builtin.command: ps -C httpd -o user=
+  register: apache_httpd_owners
+  changed_when: false
+  when: apache_httpd_running | bool
+
+- name: Assert workers run as an unprivileged account
+  ansible.builtin.assert:
+    that: apache_httpd_owners.stdout_lines | map('trim') | reject('equalto', 'root') | list | length > 0
+    fail_msg: "All httpd processes run as root: {{ apache_httpd_owners.stdout_lines }}"
+    quiet: true
+  when: apache_httpd_running | bool
+
+- name: Read the welcome page configuration
+  ansible.builtin.slurp:
+    src: /etc/httpd/conf.d/welcome.conf
+  register: apache_httpd_welcome
+  when: apache_httpd_remove_welcome_page | bool
+
+- name: Assert the default welcome page is disabled
+  ansible.builtin.assert:
+    that: "'ErrorDocument' not in (apache_httpd_welcome.content | b64decode)"
+    fail_msg: "/etc/httpd/conf.d/welcome.conf still enables the default welcome page"
+    quiet: true
+  when: apache_httpd_remove_welcome_page | bool

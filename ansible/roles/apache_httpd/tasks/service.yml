@@ -1,0 +1,27 @@
+---
+# Apply any pending reload first (on a fresh standalone host this is the first start), so the
+# steps below check the configuration that was just written.
+- name: Apply pending reloads
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the service
+  ansible.builtin.systemd_service:
+    name: "{{ apache_httpd_service_name }}"
+    state: started
+    enabled: true
+  when: not apache_httpd_cluster_managed | bool
+
+- name: Wait for the listener
+  ansible.builtin.wait_for:
+    host: "{{ (apache_httpd_listen_address in ['', '0.0.0.0']) | ternary('127.0.0.1', apache_httpd_listen_address) }}"
+    port: "{{ apache_httpd_listen_port }}"
+    timeout: "{{ apache_httpd_start_timeout }}"
+    state: started
+  when: not apache_httpd_cluster_managed | bool
+
+# The cluster starts httpd on one node at a time; enabled at boot it would also start on the other.
+- name: Leave start-up to the cluster (unit disabled at boot)
+  ansible.builtin.systemd_service:
+    name: "{{ apache_httpd_service_name }}"
+    enabled: false
+  when: apache_httpd_cluster_managed | bool
