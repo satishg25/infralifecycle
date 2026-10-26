@@ -2,6 +2,8 @@
 
 A customer-agnostic baseline for request-driven infrastructure automation: **logical request → provider-neutral contracts → pluggable drivers/engines**. Switching customer = switching a *profile*, not editing roles.
 
+**Architecture and flow diagrams:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 > **Status:** core slice only (contracts, dispatcher, mock compute driver, profile). It contains no customer or employer code. Add a `LICENSE` and confirm hosting/IP approval before publishing or sharing beyond yourself.
 
 ## Layers
