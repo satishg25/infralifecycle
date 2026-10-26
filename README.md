@@ -129,6 +129,8 @@ lab/run.sh down
 ## Thin layer for a customer app (Baloise)
 `ansible/playbooks/thin/jboss_standalone.yml` takes flat extra variables and assumes the VM exists. `python3 tools/export_thin.py <dir>` copies the roles, all thin playbooks (JBoss, Tomcat, Apache, standalone and HA), example variables and the container lab without any framework code (fails if framework words leak). The export's README is `docs/MIDDLEWARE-HANDOVER.md`; the JBoss notes are `docs/BALOISE-HANDOVER.md`.
 
+**Reusing one use case in another project** (which files to copy, how to append it to an existing `site.yml`): [docs/usecases/](docs/usecases/README.md) - one page each for Tomcat standalone, Tomcat HA, Apache standalone and Apache HA.
+
 ## Add a driver
 1. Create `roles/cap_<capability>_<driver>/` with `tasks/{apply,validate,revert}.yml`.
 2. Declare inputs in `meta/argument_specs.yml` (one block per entry point).

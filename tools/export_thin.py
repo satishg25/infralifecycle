@@ -59,6 +59,7 @@ def main() -> int:
     shutil.copy(ROOT / "docs/MIDDLEWARE-HANDOVER.md", out / "README.md")
     (out / "docs").mkdir(exist_ok=True)
     shutil.copy(ROOT / "docs/BALOISE-HANDOVER.md", out / "docs/jboss_standalone.md")
+    shutil.copytree(ROOT / "docs/usecases", out / "docs/usecases", dirs_exist_ok=True)
     (out / "ansible.cfg").write_text(CFG)
     (out / "requirements.yml").write_text(REQS)
     leaks = [str(p.relative_to(out)) for p in out.rglob("*.yml") if any(w in p.read_text() for w in FRAMEWORK_WORDS)]
