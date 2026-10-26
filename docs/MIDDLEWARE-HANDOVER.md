@@ -14,6 +14,9 @@ No profile, no request file, no framework. The VMs must already exist and be in 
 Each playbook's header lists its full input contract (flat variables, defaults, which are required).
 Bad input stops the run before any host is touched, with one precise message per check.
 
+To take a single use case into an existing project (files to copy, appending it to their
+`site.yml`), see `docs/usecases/` - one page per use case.
+
 ## Run
 ```bash
 ansible-galaxy collection install -r requirements.yml
