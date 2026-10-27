@@ -1,0 +1,10 @@
+---
+# Shared by assert.yml and validate.yml, so each can run on its own.
+# A resource may omit 'group' or leave it empty; both mean "standalone".
+- name: Note the resource, group and standalone names
+  ansible.builtin.set_fact:
+    rhel_ha_resource_names: "{{ rhel_ha_resources | map(attribute='name') | list }}"
+    rhel_ha_group_names: "{{ rhel_ha_resources | selectattr('group', 'defined') | map(attribute='group') | select | unique | list }}"
+    rhel_ha_standalone_names: >-
+      {{ (rhel_ha_resources | rejectattr('group', 'defined') | map(attribute='name') | list)
+         + (rhel_ha_resources | selectattr('group', 'defined') | rejectattr('group') | map(attribute='name') | list) }}

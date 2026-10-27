@@ -22,3 +22,7 @@ all:
       hosts:
         webha01.example.invalid:
         webha02.example.invalid:
+    rhel_ha:               # rhel_ha.yml - 2+ nodes in one subnet; node names are the Pacemaker node names
+      hosts:
+        ha01.example.invalid:
+        ha02.example.invalid:

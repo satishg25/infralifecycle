@@ -1,0 +1,97 @@
+---
+# Thin entry point for a calling application (custom app / AAP job template): FLAT extra variables
+# in, no profile, no request file, no framework dependency. Assumes the VMs already exist and are
+# in the inventory (their VM role or job runs first).
+#
+# Plain RHEL High Availability cluster: Pacemaker/Corosync on 2+ nodes with fencing, then the
+# resources you list (floating IP, services, filesystems ...) in groups, with location preferences.
+# WHAT runs is data (rhel_ha_resources); the same playbook serves a test bed and a datacentre.
+#
+#   ansible-playbook playbooks/thin/rhel_ha.yml -i <inventory> -e @<vars file> -e @<vault file>
+#   (check mode / preview)   ... --check --diff
+#
+# Contract - everything is optional unless marked:
+#   target_hosts                      inventory group or host pattern, 2+ hosts (default: rhel_ha)
+#   pacemaker_cluster_password        REQUIRED: hacluster password - from an AAP credential / Vault only
+#   pacemaker_cluster_name            1-32 letters/digits/_/-                    (default: ha_cluster)
+#   pacemaker_cluster_fence_devices   REQUIRED for production: list of {name, agent, options}
+#   pacemaker_cluster_stonith_enabled + pacemaker_cluster_allow_no_fencing   both false/true = no fencing (lab only)
+#   pacemaker_cluster_enable_repos    dnf repo ids to enable for the cluster packages (default: none)
+#   pacemaker_cluster_firewall_services   (default: ["high-availability"]; [] without firewalld)
+#   rhel_ha_resources                 REQUIRED: list of {name, type, group, params, monitor_interval, meta}
+#   rhel_ha_constraints               list of {resource, node, score} location preferences
+#   rhel_ha_resource_stickiness / rhel_ha_migration_threshold / rhel_ha_monitor_interval
+#   run_validation                    run read-only cluster + resource validation (default: true)
+#   (any other pacemaker_cluster_* / rhel_ha_* role variable may also be passed)
+- name: Validate the inputs before touching any host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Check target_hosts is a plain inventory pattern with 2+ hosts
+      ansible.builtin.assert:
+        that:
+          - (target_hosts | default('rhel_ha')) is match('^[A-Za-z0-9_.:*,&!-]+$')
+          - query('ansible.builtin.inventory_hostnames', target_hosts | default('rhel_ha')) | length >= 2
+        fail_msg: "target_hosts must be a plain inventory group/host pattern matching 2+ hosts, got '{{ target_hosts | default('rhel_ha') }}'"
+        quiet: true
+
+    - name: Check the boolean switch
+      ansible.builtin.assert:
+        that: (run_validation | default(true)) | string | lower in ['true', 'false']
+        fail_msg: "run_validation must be true or false"
+        quiet: true
+
+    - name: Check the required values are present
+      ansible.builtin.assert:
+        that:
+          - pacemaker_cluster_password | default('') | length >= 8
+          - rhel_ha_resources | default([]) | length > 0
+        fail_msg: >-
+          pacemaker_cluster_password (8+ characters, from an AAP credential or Vault) and a
+          non-empty rhel_ha_resources are required
+        quiet: true
+
+    - name: Check the fencing decision is explicit
+      ansible.builtin.assert:
+        that: >-
+          (pacemaker_cluster_stonith_enabled | default(true) | bool and (pacemaker_cluster_fence_devices | default([])) | length > 0) or
+          (not pacemaker_cluster_stonith_enabled | default(true) | bool and pacemaker_cluster_allow_no_fencing | default(false) | bool)
+        fail_msg: >-
+          Fencing: list pacemaker_cluster_fence_devices (production), or set BOTH
+          pacemaker_cluster_stonith_enabled=false and pacemaker_cluster_allow_no_fencing=true (lab only)
+        quiet: true
+
+- name: RHEL HA cluster and resources
+  hosts: "{{ target_hosts | default('rhel_ha') }}"
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Form the cluster
+      ansible.builtin.include_role:
+        name: pacemaker_cluster
+      tags: [pacemaker_cluster]
+
+    - name: Create the resources, defaults and preferences
+      ansible.builtin.include_role:
+        name: rhel_ha
+      tags: [rhel_ha]
+
+    - name: Read-only cluster validation
+      ansible.builtin.include_role:
+        name: pacemaker_cluster
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]
+
+    - name: Read-only resource validation
+      ansible.builtin.include_role:
+        name: rhel_ha
+        tasks_from: validate
+      when:
+        - run_validation | default(true) | bool
+        - not ansible_check_mode
+      tags: [validate]

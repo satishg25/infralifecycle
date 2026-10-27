@@ -1,0 +1,77 @@
+---
+# Reads use crm_resource (same output on RHEL 8 pcs 0.10 and RHEL 9 pcs 0.11); writes use pcs.
+# Commands take an argv list, never a shell string.
+
+# Pacemaker owns these units: enabled-at-boot would start a second copy next to the cluster's.
+- name: Make sure cluster-managed units are not enabled at boot (on every node)
+  ansible.builtin.systemd_service:
+    name: "{{ item.type | regex_replace('^systemd:', '') }}"
+    enabled: false
+  loop: "{{ rhel_ha_resources | selectattr('type', 'match', '^systemd:') | list }}"
+  loop_control:
+    label: "{{ item.type }}"
+  when: rhel_ha_disable_managed_services | bool
+
+- name: Check which resources exist
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ item.name }}", --query-xml]
+  register: rhel_ha_exists
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop: "{{ rhel_ha_resources }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Note what exists and the parameters to compare
+  ansible.builtin.set_fact:
+    rhel_ha_existing: "{{ rhel_ha_exists.results | selectattr('rc', 'equalto', 0) | map(attribute='item.name') | list }}"
+    rhel_ha_param_items: >-
+      {%- set out = [] -%}
+      {%- for r in rhel_ha_resources -%}
+      {%- for k, v in (r.params | default({})).items() -%}
+      {%- set _ = out.append({'resource': r.name, 'key': k, 'value': v | string}) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+  run_once: true
+
+# In list order, so the start order inside a group is the order given.
+- name: Create the missing resources
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pcs', 'resource', 'create', item.name, item.type]
+         + ((item.params | default({})).items() | map('join', '=') | list)
+         + ['op', 'monitor', 'interval=' ~ (item.monitor_interval | default(rhel_ha_monitor_interval))]
+         + (['meta'] + ((item.meta | default({})).items() | map('join', '=') | list) if (item.meta | default({})) | length > 0 else [])
+         + (['--group', item.group] if item.group | default('') != '' else []) }}
+  changed_when: true
+  run_once: true
+  loop: "{{ rhel_ha_resources }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in rhel_ha_existing
+
+# Drift: a parameter was changed by hand, or the caller changed it in the variables.
+- name: Read the parameters of the resources that already existed
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ item.resource }}", --get-parameter, "{{ item.key }}"]
+  register: rhel_ha_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop: "{{ rhel_ha_param_items | selectattr('resource', 'in', rhel_ha_existing) | list }}"
+  loop_control:
+    label: "{{ item.resource }}.{{ item.key }}"
+
+- name: Correct parameters that differ
+  ansible.builtin.command:
+    argv: [pcs, resource, update, "{{ item.item.resource }}", "{{ item.item.key }}={{ item.item.value }}"]
+  changed_when: true
+  run_once: true
+  loop: "{{ rhel_ha_current.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.resource | default('') }}.{{ item.item.key | default('') }}"
+  when: item.stdout | default('') | trim != item.item.value | string

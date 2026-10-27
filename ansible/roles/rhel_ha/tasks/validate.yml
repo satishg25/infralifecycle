@@ -1,0 +1,81 @@
+---
+# Read-only. Use:  include_role: {name: rhel_ha, tasks_from: validate}
+- name: Note the resource and group names
+  ansible.builtin.import_tasks: names.yml
+
+- name: Locate every resource and group
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ item }}", --locate]
+  register: rhel_ha_locate_check
+  changed_when: false
+  check_mode: false
+  run_once: true
+  loop: "{{ rhel_ha_resource_names + rhel_ha_group_names }}"
+
+- name: Assert each resource and group runs on exactly one node
+  ansible.builtin.assert:
+    that: item.stdout_lines | select('search', 'is running on') | list | length == 1
+    fail_msg: "{{ item.item }} is not running on exactly one node: {{ item.stdout }}"
+    quiet: true
+  run_once: true
+  loop: "{{ rhel_ha_locate_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Read the node each resource and group runs on
+  ansible.builtin.set_fact:
+    rhel_ha_where_names: "{{ rhel_ha_locate_check.results | map(attribute='item') | list }}"
+    rhel_ha_where_nodes: "{{ rhel_ha_locate_check.results | map(attribute='stdout') | map('regex_replace', '^.*running on: (\\S+).*$', '\\1') | list }}"
+  run_once: true
+
+- name: Map each resource and group to its node
+  ansible.builtin.set_fact:
+    rhel_ha_where: "{{ dict(rhel_ha_where_names | zip(rhel_ha_where_nodes)) }}"
+  run_once: true
+
+# A group runs as one, but check that each member really sits on the group's node.
+- name: Assert group members run where their group runs
+  ansible.builtin.assert:
+    that: rhel_ha_where[item.name] == rhel_ha_where[item.group]
+    fail_msg: "{{ item.name }} runs on {{ rhel_ha_where[item.name] }}, not where group {{ item.group }} runs ({{ rhel_ha_where[item.group] }})"
+    quiet: true
+  run_once: true
+  loop: "{{ rhel_ha_resources | selectattr('group', 'defined') | rejectattr('group', 'equalto', '') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read service states
+  ansible.builtin.service_facts:
+  when: rhel_ha_resources | selectattr('type', 'match', '^systemd:') | list | length > 0
+
+# A managed unit enabled at boot would be started by systemd next to the cluster's copy.
+- name: Assert cluster-managed units are not enabled at boot
+  ansible.builtin.assert:
+    that: >-
+      (ansible_facts['services'][(item.type | regex_replace('^systemd:', '')) ~ '.service']['status'] | default('absent'))
+      not in ['enabled', 'static-enabled']
+    fail_msg: "{{ item.type }} is enabled at boot on {{ inventory_hostname }}; the cluster must be the only thing that starts it"
+    quiet: true
+  loop: "{{ rhel_ha_resources | selectattr('type', 'match', '^systemd:') | list }}"
+  loop_control:
+    label: "{{ item.type }}"
+
+# A cluster-managed unit runs on exactly one node.
+- name: Note where each managed unit runs
+  ansible.builtin.set_fact:
+    rhel_ha_unit_running: >-
+      {{ rhel_ha_unit_running | default({}) | combine({item.name:
+         (ansible_facts['services'][(item.type | regex_replace('^systemd:', '')) ~ '.service']['state'] | default('absent')) == 'running'}) }}
+  loop: "{{ rhel_ha_resources | selectattr('type', 'match', '^systemd:') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Assert each managed unit runs on exactly one node
+  ansible.builtin.assert:
+    that: ansible_play_hosts | map('extract', hostvars, ['rhel_ha_unit_running', item.name]) | select | list | length == 1
+    fail_msg: "{{ item.type }} must run on exactly one node"
+    quiet: true
+  run_once: true
+  loop: "{{ rhel_ha_resources | selectattr('type', 'match', '^systemd:') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
