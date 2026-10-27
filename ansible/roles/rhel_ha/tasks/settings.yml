@@ -1,0 +1,60 @@
+---
+# Cluster-wide resource defaults (stickiness, migration-threshold) and location preferences.
+- name: Read the resource defaults
+  ansible.builtin.command:
+    argv: [cibadmin, --query, --xpath, "//rsc_defaults//nvpair[@name='{{ item.key }}']"]
+  register: rhel_ha_defaults_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop:
+    - {key: resource-stickiness, value: "{{ rhel_ha_resource_stickiness }}"}
+    - {key: migration-threshold, value: "{{ rhel_ha_migration_threshold }}"}
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Set the resource defaults that differ
+  ansible.builtin.command:
+    argv: [pcs, resource, defaults, update, "{{ item.item.key }}={{ item.item.value }}"]
+  changed_when: true
+  run_once: true
+  loop: "{{ rhel_ha_defaults_current.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  when: ('value="' ~ item.item.value ~ '"') not in item.stdout | default('')
+
+# A preference is one constraint per resource and node. A different score replaces it.
+- name: Read the existing location preferences
+  ansible.builtin.command:
+    argv: [cibadmin, --query, --xpath, "//rsc_location[@rsc='{{ item.resource }}' and @node='{{ item.node }}']"]
+  register: rhel_ha_location_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  loop: "{{ rhel_ha_constraints }}"
+  loop_control:
+    label: "{{ item.resource }} on {{ item.node }}"
+
+- name: Remove location preferences whose score differs
+  ansible.builtin.command:
+    argv: [pcs, constraint, delete, "{{ item.stdout | regex_search('id=\"([^\"]+)\"', '\\1') | first }}"]
+  changed_when: true
+  run_once: true
+  loop: "{{ rhel_ha_location_current.results }}"
+  loop_control:
+    label: "{{ item.item.resource }} on {{ item.item.node }}"
+  when:
+    - item.rc == 0
+    - ('score="' ~ item.item.score ~ '"') not in item.stdout
+
+- name: Add the location preferences that are missing or were just replaced
+  ansible.builtin.command:
+    argv: [pcs, constraint, location, "{{ item.item.resource }}", prefers, "{{ item.item.node }}={{ item.item.score }}"]
+  changed_when: true
+  run_once: true
+  loop: "{{ rhel_ha_location_current.results }}"
+  loop_control:
+    label: "{{ item.item.resource }} on {{ item.item.node }}"
+  when: item.rc != 0 or ('score="' ~ item.item.score ~ '"') not in item.stdout

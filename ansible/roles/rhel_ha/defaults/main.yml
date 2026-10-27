@@ -1,0 +1,34 @@
+---
+# Generic Pacemaker resource layer for a plain RHEL HA cluster. WHAT runs and WHERE is data, so the
+# same role serves an Azure test bed and a datacentre: only the variables differ (fencing devices,
+# VIP resource type, shared storage), never the role.
+#
+# The cluster itself (packages, pcsd, corosync, fencing) comes from the pacemaker_cluster role,
+# which must run first.
+
+# --- Resources -------------------------------------------------------------------------------
+# A list; the order is the start order within a group (stop is the reverse).
+#   - name: app-vip                       required, plain name
+#     type: ocf:heartbeat:IPaddr2         required: ocf:<provider>:<agent> or systemd:<unit>
+#     group: app                          optional: resources in one group run on one node, in order
+#     params: {ip: 10.0.0.50, cidr_netmask: "24"}      optional agent parameters
+#     monitor_interval: 10s               optional, default rhel_ha_monitor_interval
+#     meta: {migration-threshold: "3"}    optional meta attributes (set at creation only)
+# Parameters are checked for drift on every run; meta attributes are not (set them at creation).
+rhel_ha_resources: []
+
+# --- Constraints -----------------------------------------------------------------------------
+# Location preferences only (order/colocation come from groups):
+#   - {resource: app, node: node1, score: 100}      score: integer, INFINITY or -INFINITY
+rhel_ha_constraints: []
+
+# --- Behaviour -------------------------------------------------------------------------------
+rhel_ha_monitor_interval: 10s
+# Stay where it runs after a failover instead of moving back when the failed node returns.
+rhel_ha_resource_stickiness: 100
+# Failures on one node before the resource is moved away from it.
+rhel_ha_migration_threshold: 3
+# A systemd unit that the cluster manages must not also be enabled at boot. true = the role
+# disables it on every node (it never starts or stops it).
+rhel_ha_disable_managed_services: true
+rhel_ha_start_timeout: 120

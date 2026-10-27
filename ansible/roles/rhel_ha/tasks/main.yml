@@ -1,0 +1,20 @@
+---
+# Flow: assert -> create resources and correct drift -> defaults and constraints -> wait for start.
+# Every cluster-wide step runs once and checks state before it acts, so a second run changes
+# nothing. Run the read-only checks with:  tasks_from: validate
+- name: Assert inputs
+  ansible.builtin.import_tasks: assert.yml
+  tags: [rhel_ha, rhel_ha_assert]
+
+- name: Create resources and correct parameter drift
+  ansible.builtin.import_tasks: resources.yml
+  tags: [rhel_ha, rhel_ha_resources]
+
+- name: Cluster-wide defaults and location preferences
+  ansible.builtin.import_tasks: settings.yml
+  tags: [rhel_ha, rhel_ha_settings]
+
+- name: Wait until everything runs
+  ansible.builtin.import_tasks: wait.yml
+  when: not ansible_check_mode   # nothing exists to wait for in a plan
+  tags: [rhel_ha, rhel_ha_wait]

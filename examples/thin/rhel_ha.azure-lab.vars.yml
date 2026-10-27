@@ -1,0 +1,31 @@
+---
+# AZURE TEST BED. Same playbook and roles as the datacentre; only these variables differ.
+# Secrets (pacemaker_cluster_password, fence credentials) come from -e @vault.yml, never this file.
+#
+# What does NOT work on Azure, and why this file avoids it:
+#  - A floating IP added inside the guest (ocf:heartbeat:IPaddr2): Azure ignores gratuitous ARP, so
+#    it is not routable. Real Azure needs an internal load balancer + ocf:heartbeat:azure-lb.
+#    Test the resource MECHANICS here with Dummy; use IPaddr2 in the datacentre profile.
+#  - The High Availability repo: not in standard pay-as-you-go RHEL images (as far as I know); check
+#    `dnf repolist all | grep -i high` first.
+target_hosts: rhel_ha
+run_validation: true
+
+pacemaker_cluster_name: azlab_ha
+pacemaker_cluster_enable_repos: []          # set the HA repo id if it is disabled by default
+pacemaker_cluster_firewall_services: []     # firewalld is inactive on the lab VMs; the NSG filters
+
+# LAB ONLY: no fencing. For a realistic Azure test use fence_azure_arm (managed identity with a
+# least-privilege custom role: read + power off on these two VMs only) instead of these two lines.
+pacemaker_cluster_stonith_enabled: false
+pacemaker_cluster_allow_no_fencing: true
+
+rhel_ha_resources:
+  - name: app-state
+    type: ocf:heartbeat:Dummy
+    group: app
+  - name: app-probe
+    type: ocf:heartbeat:Dummy
+    group: app
+rhel_ha_constraints:
+  - {resource: app, node: node1, score: "100"}

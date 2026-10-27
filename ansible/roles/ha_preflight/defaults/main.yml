@@ -1,0 +1,41 @@
+---
+# Read-only handoff check between "the nodes are built" and "form the cluster". It changes nothing.
+# Every problem found on every node is collected and reported together, and the run stops before
+# any cluster change if there is one. Run it before the pacemaker_cluster role.
+
+# --- Cluster inputs (shared with pacemaker_cluster, so one set of values) ----------------------
+ha_preflight_cluster_name: "{{ pacemaker_cluster_name | default('ha_cluster') }}"
+ha_preflight_min_nodes: 2
+
+# --- Platform --------------------------------------------------------------------------------
+# RHEL and its rebuilds (Rocky, Alma, Oracle) all report the RedHat family.
+ha_preflight_supported_os_families: [RedHat]
+ha_preflight_supported_majors: ["8", "9"]
+
+# --- Name resolution -------------------------------------------------------------------------
+# Every node name must resolve, from every node, to that node's own address (never loopback).
+# A host name that maps to 127.0.0.1 is the classic cause of a cluster that forms and then misbehaves.
+ha_preflight_check_name_resolution: true
+
+# --- Reachability ----------------------------------------------------------------------------
+# Plain TCP from each node to every other node. SSH is already open, so it proves the network path
+# and the NSG/firewall between the nodes. The cluster ports (2224/tcp pcsd, 5404-5405/udp corosync)
+# only open once the cluster software runs, so those are proven by the cluster build itself.
+ha_preflight_check_reachability: true
+ha_preflight_reachability_port: 22
+
+# --- Time ------------------------------------------------------------------------------------
+# Corosync and logs need synchronised clocks.
+ha_preflight_check_time_sync: true
+
+# --- Packages --------------------------------------------------------------------------------
+# The HA repository (rhel-8-for-x86_64-highavailability-rpms, or the RHUI/Satellite equivalent) must
+# provide the cluster packages unless they are already installed. Catching it here gives a clear
+# message instead of a failed dnf transaction halfway through the build.
+ha_preflight_check_repos: true
+ha_preflight_enable_repos: "{{ pacemaker_cluster_enable_repos | default([]) }}"
+ha_preflight_packages: "{{ pacemaker_cluster_packages | default(['pacemaker', 'pcs', 'fence-agents-all']) }}"
+
+# --- Shared storage readiness (validate only; this role never creates storage) ---------------
+# Block devices that must exist on every node, as stable paths:  ["/dev/disk/by-id/wwn-0x..."]
+ha_preflight_shared_devices: []

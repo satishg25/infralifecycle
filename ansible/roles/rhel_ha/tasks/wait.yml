@@ -1,0 +1,13 @@
+---
+# A group is located as one; a resource outside any group on its own.
+- name: Wait until every group and standalone resource runs on a node
+  ansible.builtin.command:
+    argv: [crm_resource, --resource, "{{ item }}", --locate]
+  register: rhel_ha_locate
+  changed_when: false
+  check_mode: false
+  until: rhel_ha_locate.stdout is search('is running on')
+  retries: "{{ (rhel_ha_start_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  run_once: true
+  loop: "{{ rhel_ha_group_names + rhel_ha_standalone_names }}"

@@ -12,6 +12,7 @@ up: `ansible/roles/X` is `roles/X`, `ansible/playbooks/thin/X.yml` is `playbooks
 | Tomcat HA (2+ nodes + load balancer) | [tomcat_ha.md](tomcat_ha.md) | `tomcat`, `apache_httpd` |
 | Apache httpd standalone | [apache_standalone.md](apache_standalone.md) | `apache_httpd` |
 | Apache httpd HA (Pacemaker) | [apache_ha.md](apache_ha.md) | `apache_httpd`, `pacemaker_cluster`, `apache_ha` |
+| Plain RHEL HA cluster (resources from data) | [rhel_ha.md](rhel_ha.md) | `pacemaker_cluster`, `rhel_ha` |
 
 Every integration snippet on these pages was run against the container lab
 (`lab/`, Rocky Linux 8, ansible-core 2.16) from a separate "existing project" with its own group

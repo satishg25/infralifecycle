@@ -1,0 +1,21 @@
+---
+# Same rule as the pacemaker_cluster role, so both agree on the node names and addresses:
+# an explicit pacemaker_cluster_nodes list wins, otherwise one entry per play host.
+- name: Build the node list from the play hosts
+  ansible.builtin.set_fact:
+    ha_preflight_node_list: >-
+      {%- if pacemaker_cluster_nodes | default([]) | length > 0 -%}
+      {{ pacemaker_cluster_nodes }}
+      {%- else -%}
+      {%- set nodes = [] -%}
+      {%- for h in ansible_play_hosts_all -%}
+      {%- set _ = nodes.append({
+            'name': hostvars[h]['pacemaker_cluster_node_name'] | default(hostvars[h]['ansible_facts']['hostname']),
+            'addr': hostvars[h]['pacemaker_cluster_node_addr'] | default(hostvars[h]['ansible_facts']['default_ipv4']['address'])}) -%}
+      {%- endfor -%}
+      {{ nodes }}
+      {%- endif -%}
+
+- name: Note this node's own cluster name
+  ansible.builtin.set_fact:
+    ha_preflight_self_name: "{{ pacemaker_cluster_node_name | default(ansible_facts['hostname']) }}"

@@ -1,0 +1,41 @@
+---
+# DATACENTRE TEMPLATE (VMware vSphere fencing assumed - the platform is an ASSUMPTION; only
+# pacemaker_cluster_fence_devices changes if it is not vSphere, e.g. fence_ipmilan / fence_redfish
+# for physical servers). Placeholders only: nothing here is a real name, address or credential.
+# Secrets come from AAP credentials or Vault: -e @vault.yml  (pacemaker_cluster_password,
+# vault_fence_user, vault_fence_password).
+target_hosts: rhel_ha
+run_validation: true
+
+pacemaker_cluster_name: app_ha
+pacemaker_cluster_enable_repos: []          # the HA repo comes from the Satellite content view
+pacemaker_cluster_firewall_services: [high-availability]
+
+# Fencing is required: the run stops unless devices are listed.
+pacemaker_cluster_stonith_enabled: true
+pacemaker_cluster_fence_devices:
+  - name: fence_vcenter
+    agent: fence_vmware_rest
+    options:
+      ip: vcenter.example.invalid
+      username: "{{ vault_fence_user }}"
+      password: "{{ vault_fence_password }}"
+      ssl_insecure: "0"
+      pcmk_host_map: "node1:node1-vm;node2:node2-vm"
+
+# One group = one node at a time, started in this order, stopped in reverse.
+rhel_ha_resources:
+  - name: app-vip
+    type: ocf:heartbeat:IPaddr2
+    group: app
+    params: {ip: 192.0.2.50, cidr_netmask: "24"}      # reserved, unused address in the nodes' subnet
+  - name: app-fs                                      # shared LUN (LVM-activate + Filesystem) goes here
+    type: ocf:heartbeat:Dummy                         #   if the application needs shared storage
+    group: app
+  - name: app-service
+    type: systemd:myapp                               # the unit must be installed, and is left disabled
+    group: app
+rhel_ha_constraints:
+  - {resource: app, node: node1, score: "100"}
+rhel_ha_resource_stickiness: 100
+rhel_ha_migration_threshold: 3

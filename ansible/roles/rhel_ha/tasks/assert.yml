@@ -1,0 +1,62 @@
+---
+- name: Assert at least one resource is defined
+  ansible.builtin.assert:
+    that: rhel_ha_resources | length > 0
+    fail_msg: "rhel_ha_resources is empty - define at least one resource"
+    quiet: true
+  run_once: true
+
+# Names go straight into pcs argv (never a shell), but are still held to a plain allow-list.
+- name: Assert every resource is well formed
+  ansible.builtin.assert:
+    that:
+      - item.name | default('') is match('^[A-Za-z0-9_-]+$')
+      - item.type | default('') is match('^(ocf:[a-z0-9_]+:[A-Za-z0-9_-]+|systemd:[A-Za-z0-9_@.-]+)$')
+      - item.group | default('') == '' or item.group is match('^[A-Za-z0-9_-]+$')
+      - (item.monitor_interval | default(rhel_ha_monitor_interval)) is match('^[0-9]+(s|min)?$')
+      - (item.params | default({})).keys() | reject('match', '^[A-Za-z0-9_-]+$') | list | length == 0
+      - (item.meta | default({})).keys() | reject('match', '^[A-Za-z0-9_-]+$') | list | length == 0
+    fail_msg: >-
+      Resource '{{ item.name | default('?') }}': name must be plain (letters, digits, _ -), type
+      ocf:<provider>:<agent> or systemd:<unit>, group plain, monitor_interval like 10s, and parameter
+      and meta keys plain
+    quiet: true
+  loop: "{{ rhel_ha_resources }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+  run_once: true
+
+- name: Note the resource and group names
+  ansible.builtin.import_tasks: names.yml
+
+- name: Assert resource and group names are unique and do not collide
+  ansible.builtin.assert:
+    that:
+      - rhel_ha_resource_names | unique | length == rhel_ha_resource_names | length
+      - rhel_ha_group_names | intersect(rhel_ha_resource_names) | length == 0
+    fail_msg: "Resource names must be unique, and a group name must not equal a resource name"
+    quiet: true
+  run_once: true
+
+- name: Assert the constraints are well formed and refer to something defined
+  ansible.builtin.assert:
+    that:
+      - item.resource in rhel_ha_resource_names + rhel_ha_group_names
+      - item.node | default('') is match('^[A-Za-z0-9][A-Za-z0-9.-]*$')
+      - item.score | default('') | string is match('^(-?[0-9]+|[-+]?INFINITY)$')
+    fail_msg: "Constraint {{ item }}: resource must be a defined resource or group, node a plain name, score an integer or INFINITY"
+    quiet: true
+  loop: "{{ rhel_ha_constraints }}"
+  loop_control:
+    label: "{{ item.resource | default('?') }} on {{ item.node | default('?') }}"
+  run_once: true
+
+- name: Assert the constraint nodes are cluster members
+  ansible.builtin.assert:
+    that: item.node in (pacemaker_cluster_node_list | default([]) | map(attribute='name') | list) or pacemaker_cluster_node_list is not defined
+    fail_msg: "Constraint node {{ item.node }} is not one of the cluster nodes"
+    quiet: true
+  loop: "{{ rhel_ha_constraints }}"
+  loop_control:
+    label: "{{ item.node }}"
+  run_once: true

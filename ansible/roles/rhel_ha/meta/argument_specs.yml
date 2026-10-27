@@ -1,0 +1,31 @@
+---
+argument_specs:
+  main:
+    short_description: Pacemaker resources and location preferences for a plain RHEL HA cluster, from data
+    options: &opts
+      rhel_ha_resources:
+        type: list
+        elements: dict
+        required: true
+        options:
+          name: {type: str, required: true}
+          type: {type: str, required: true}
+          group: {type: str}
+          params: {type: dict}
+          monitor_interval: {type: str}
+          meta: {type: dict}
+      rhel_ha_constraints:
+        type: list
+        elements: dict
+        options:
+          resource: {type: str, required: true}
+          node: {type: str, required: true}
+          score: {type: str, required: true}
+      rhel_ha_monitor_interval: {type: str}
+      rhel_ha_resource_stickiness: {type: int}
+      rhel_ha_migration_threshold: {type: int}
+      rhel_ha_disable_managed_services: {type: bool}
+      rhel_ha_start_timeout: {type: int}
+  validate:
+    short_description: Read-only checks - every resource and group runs on exactly one node, groups stay together, managed units are not enabled at boot
+    options: *opts
