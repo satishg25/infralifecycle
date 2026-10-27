@@ -1,0 +1,37 @@
+---
+- name: Note this node's preflight result
+  ansible.builtin.set_fact:
+    ha_preflight_result:
+      node: "{{ ha_preflight_self_name }}"
+      passed: "{{ ha_preflight_problems | length == 0 }}"
+      problems: "{{ ha_preflight_problems }}"
+      info: "{{ ha_preflight_info }}"
+
+# One line per node, passed or not, so a green run still shows what was seen.
+- name: Summarise every node
+  ansible.builtin.set_fact:
+    ha_preflight_summary: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, 'ha_preflight_result') | select('defined') | list }}
+  run_once: true
+
+- name: Show the preflight summary
+  ansible.builtin.debug:
+    var: ha_preflight_summary
+  run_once: true
+
+- name: Stop before any cluster change if anything is wrong
+  ansible.builtin.assert:
+    that:
+      - ansible_play_hosts | length == ansible_play_hosts_all | length
+      - ha_preflight_summary | length == ansible_play_hosts_all | length
+      - ha_preflight_summary | selectattr('passed', 'equalto', false) | list | length == 0
+    fail_msg: >-
+      Preflight failed. Nothing was changed.
+      {% for r in ha_preflight_summary | selectattr('passed', 'equalto', false) %}
+      [{{ r.node }}] {{ r.problems | join(' ; ') }}
+      {% endfor %}
+      {% if ansible_play_hosts | length != ansible_play_hosts_all | length %}
+      Unreachable hosts: {{ ansible_play_hosts_all | difference(ansible_play_hosts) | join(', ') }}
+      {% endif %}
+    success_msg: "Preflight passed on {{ ha_preflight_summary | length }} nodes"
+  run_once: true

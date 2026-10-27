@@ -1,0 +1,17 @@
+---
+argument_specs:
+  main:
+    short_description: Read-only preflight for a RHEL HA build - platform, node list, name resolution, reachability, time, HA repo, shared devices
+    options:
+      ha_preflight_cluster_name: {type: str}
+      ha_preflight_min_nodes: {type: int}
+      ha_preflight_supported_os_families: {type: list, elements: str}
+      ha_preflight_supported_majors: {type: list, elements: str}
+      ha_preflight_check_name_resolution: {type: bool}
+      ha_preflight_check_reachability: {type: bool}
+      ha_preflight_reachability_port: {type: int}
+      ha_preflight_check_time_sync: {type: bool}
+      ha_preflight_check_repos: {type: bool}
+      ha_preflight_enable_repos: {type: list, elements: str}
+      ha_preflight_packages: {type: list, elements: str}
+      ha_preflight_shared_devices: {type: list, elements: str}

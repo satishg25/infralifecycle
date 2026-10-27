@@ -1,0 +1,173 @@
+---
+# Each check appends plain-English problems to ha_preflight_problems (per node) instead of failing
+# at once, so one run shows everything that is wrong. report.yml stops the play afterwards.
+- name: Start with no problems
+  ansible.builtin.set_fact:
+    ha_preflight_problems: []
+
+# --- 1. Platform and inputs -------------------------------------------------------------------
+- name: Check the platform
+  ansible.builtin.set_fact:
+    ha_preflight_problems: >-
+      {{ ha_preflight_problems + ['unsupported platform: found ' ~ ansible_facts['distribution'] | default('?') ~ ' '
+         ~ ansible_facts['distribution_major_version'] | default('?') ~ ', need '
+         ~ ha_preflight_supported_os_families | join('/') ~ ' ' ~ ha_preflight_supported_majors | join(' or ')] }}
+  when: not (ansible_facts['os_family'] in ha_preflight_supported_os_families
+             and ansible_facts['distribution_major_version'] in ha_preflight_supported_majors)
+
+- name: Check the node list and the cluster name
+  ansible.builtin.set_fact:
+    ha_preflight_problems: "{{ ha_preflight_problems + [item] }}"
+  loop: >-
+    {{ (['need at least ' ~ ha_preflight_min_nodes ~ ' nodes, found ' ~ ha_preflight_node_list | length]
+          if ha_preflight_node_list | length < ha_preflight_min_nodes else [])
+       + (['node names are not unique: ' ~ ha_preflight_node_list | map(attribute='name') | join(', ')]
+          if ha_preflight_node_list | map(attribute='name') | unique | list | length != ha_preflight_node_list | length else [])
+       + (['node addresses are not unique: ' ~ ha_preflight_node_list | map(attribute='addr') | join(', ')]
+          if ha_preflight_node_list | map(attribute='addr') | unique | list | length != ha_preflight_node_list | length else [])
+       + (['node names must be plain host names (letters, digits, dots, hyphens)']
+          if ha_preflight_node_list | map(attribute='name') | reject('match', '^[A-Za-z0-9][A-Za-z0-9.-]*$') | list | length > 0 else [])
+       + (['cluster name must be 1-32 letters, digits, _ or -, got ' ~ ha_preflight_cluster_name]
+          if ha_preflight_cluster_name is not match('^[A-Za-z0-9_-]{1,32}$') else []) }}
+
+# --- 2. Name resolution, from THIS node, for every node ---------------------------------------
+- name: Resolve every node name from this node
+  ansible.builtin.command:
+    argv: [getent, ahostsv4, "{{ item.name }}"]
+  register: ha_preflight_resolved
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop: "{{ ha_preflight_node_list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ha_preflight_check_name_resolution | bool
+
+- name: Record names that do not resolve
+  ansible.builtin.set_fact:
+    ha_preflight_problems: "{{ ha_preflight_problems + [item.item.name ~ ' does not resolve from ' ~ ha_preflight_self_name] }}"
+  loop: "{{ ha_preflight_resolved.results | default([]) | rejectattr('skipped', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+
+- name: Record names that resolve to the wrong address
+  ansible.builtin.set_fact:
+    ha_preflight_problems: >-
+      {{ ha_preflight_problems + [item.item.name ~ ' resolves to ' ~ ips | join(', ') ~ ' from ' ~ ha_preflight_self_name
+         ~ ', expected ' ~ item.item.addr ~ (' (loopback: fix /etc/hosts)' if ips | select('match', '^127[.]') | list | length > 0 else '')] }}
+  vars:
+    ips: "{{ item.stdout_lines | map('split') | map('first') | unique | list }}"
+  loop: "{{ ha_preflight_resolved.results | default([]) | rejectattr('skipped', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.rc == 0
+    - (item.item.addr not in (item.stdout_lines | map('split') | map('first') | list))
+      or (item.stdout_lines | map('split') | map('first') | select('match', '^127[.]') | list | length > 0)
+
+# --- 3. Network path from THIS node to every other node ---------------------------------------
+- name: Reach every other node over TCP
+  ansible.builtin.wait_for:
+    host: "{{ item.addr }}"
+    port: "{{ ha_preflight_reachability_port }}"
+    timeout: 5
+  register: ha_preflight_reach
+  failed_when: false
+  check_mode: false
+  loop: "{{ ha_preflight_node_list | rejectattr('name', 'equalto', ha_preflight_self_name) | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ha_preflight_check_reachability | bool
+
+- name: Record nodes that cannot be reached
+  ansible.builtin.set_fact:
+    ha_preflight_problems: >-
+      {{ ha_preflight_problems + [ha_preflight_self_name ~ ' cannot reach ' ~ item.item.name ~ ' (' ~ item.item.addr ~ ') on tcp/'
+         ~ ha_preflight_reachability_port ~ ': check the NSG or firewall between the nodes'] }}
+  loop: "{{ ha_preflight_reach.results | default([]) | rejectattr('skipped', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.msg is defined
+
+# --- 4. Time ---------------------------------------------------------------------------------
+- name: Read the time synchronisation state
+  ansible.builtin.command:
+    argv: [timedatectl, show, --property=NTPSynchronized, --value]
+  register: ha_preflight_time
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ha_preflight_check_time_sync | bool
+
+- name: Record a clock that is not synchronised
+  ansible.builtin.set_fact:
+    ha_preflight_problems: "{{ ha_preflight_problems + ['the clock is not synchronised (timedatectl NTPSynchronized is not yes): check chronyd'] }}"
+  when:
+    - ha_preflight_time.skipped is not defined
+    - ha_preflight_time.stdout | default('') | trim != 'yes'
+
+# --- 5. Cluster packages are installed or installable -----------------------------------------
+- name: Check which cluster packages are already installed
+  ansible.builtin.command:
+    argv: [rpm, -q, "{{ item }}"]
+  register: ha_preflight_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop: "{{ ha_preflight_packages }}"
+  when: ha_preflight_check_repos | bool
+
+- name: Check the missing ones are available from the enabled repositories
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-q', 'list', '--available'] + (ha_preflight_enable_repos | map('regex_replace', '^', '--enablerepo=') | list)
+         + [item.item] }}
+  register: ha_preflight_available
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop: "{{ ha_preflight_installed.results | default([]) | rejectattr('skipped', 'defined') | rejectattr('rc', 'equalto', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Record packages that are neither installed nor available
+  ansible.builtin.set_fact:
+    ha_preflight_problems: >-
+      {{ ha_preflight_problems + [item.item.item ~ ' is not installed and not available from the enabled repositories: enable the
+         High Availability repository (Satellite content view, or RHUI) or set pacemaker_cluster_enable_repos'] }}
+  loop: "{{ ha_preflight_available.results | default([]) | rejectattr('skipped', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  when: item.rc != 0
+
+# --- 6. Shared storage readiness (validate only) ----------------------------------------------
+- name: Check the shared devices exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: ha_preflight_devices
+  loop: "{{ ha_preflight_shared_devices }}"
+
+- name: Record shared devices that are missing or not block devices
+  ansible.builtin.set_fact:
+    ha_preflight_problems: "{{ ha_preflight_problems + ['shared device ' ~ item.item ~ ' is missing or not a block device on ' ~ ha_preflight_self_name] }}"
+  loop: "{{ ha_preflight_devices.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not (item.stat.exists | default(false) and item.stat.isblk | default(false))
+
+# --- 7. Facts for the report (information, never a failure) -----------------------------------
+- name: Read the firewalld state
+  ansible.builtin.command:
+    argv: [systemctl, is-active, firewalld]
+  register: ha_preflight_firewalld
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Note information for the report
+  ansible.builtin.set_fact:
+    ha_preflight_info:
+      selinux: "{{ ansible_facts['selinux']['mode'] | default(ansible_facts['selinux']['status'] | default('unknown')) }}"
+      firewalld: "{{ ha_preflight_firewalld.stdout | default('unknown') | trim }}"
+      address: "{{ ansible_facts['default_ipv4']['address'] | default('unknown') }}"

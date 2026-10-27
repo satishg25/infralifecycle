@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ROLES = ["jboss", "tomcat", "apache_httpd", "pacemaker_cluster", "apache_ha", "rhel_ha", "validation", "rhel_baseline"]
+ROLES = ["jboss", "tomcat", "apache_httpd", "pacemaker_cluster", "apache_ha", "ha_preflight", "rhel_ha", "validation", "rhel_baseline"]
 PLAYBOOKS = {
     f"ansible/playbooks/thin/{name}.yml": f"playbooks/{name}.yml"
     for name in ("jboss_standalone", "tomcat_standalone", "tomcat_ha", "apache_standalone", "apache_ha", "rhel_ha")

@@ -21,6 +21,8 @@
 #   rhel_ha_resources                 REQUIRED: list of {name, type, group, params, monitor_interval, meta}
 #   rhel_ha_constraints               list of {resource, node, score} location preferences
 #   rhel_ha_resource_stickiness / rhel_ha_migration_threshold / rhel_ha_monitor_interval
+#   run_preflight                     read-only checks BEFORE any cluster change (default: true)
+#   ha_preflight_*                    preflight options: shared devices, reachability port, switches per check
 #   run_validation                    run read-only cluster + resource validation (default: true)
 #   (any other pacemaker_cluster_* / rhel_ha_* role variable may also be passed)
 - name: Validate the inputs before touching any host
@@ -37,10 +39,12 @@
         fail_msg: "target_hosts must be a plain inventory group/host pattern matching 2+ hosts, got '{{ target_hosts | default('rhel_ha') }}'"
         quiet: true
 
-    - name: Check the boolean switch
+    - name: Check the boolean switches
       ansible.builtin.assert:
-        that: (run_validation | default(true)) | string | lower in ['true', 'false']
-        fail_msg: "run_validation must be true or false"
+        that:
+          - (run_validation | default(true)) | string | lower in ['true', 'false']
+          - (run_preflight | default(true)) | string | lower in ['true', 'false']
+        fail_msg: "run_validation and run_preflight must be true or false"
         quiet: true
 
     - name: Check the required values are present
@@ -68,6 +72,12 @@
   become: true
   gather_facts: true
   tasks:
+    - name: Preflight - read-only checks, stops here if anything is wrong
+      ansible.builtin.include_role:
+        name: ha_preflight
+      when: run_preflight | default(true) | bool
+      tags: [preflight]
+
     - name: Form the cluster
       ansible.builtin.include_role:
         name: pacemaker_cluster

@@ -10,6 +10,7 @@ differ. Back to the [use-case index](README.md).
 | Repo path | Copy to (your project) |
 |---|---|
 | `ansible/roles/pacemaker_cluster/` (whole folder) | `roles/pacemaker_cluster/` |
+| `ansible/roles/ha_preflight/` (whole folder: read-only checks before the build) | `roles/ha_preflight/` |
 | `ansible/roles/rhel_ha/` (whole folder: defaults, meta, 6 task files) | `roles/rhel_ha/` |
 | `ansible/playbooks/thin/rhel_ha.yml` | `playbooks/rhel_ha.yml` |
 | `examples/thin/rhel_ha.datacenter.vars.yml`, `rhel_ha.azure-lab.vars.yml` | starting points |
@@ -26,6 +27,15 @@ differ. Back to the [use-case index](README.md).
 | Shared storage | usually none (use `Dummy`) | `LVM-activate` + `Filesystem` resources | resources in the same group |
 | HA repo | check it exists; not in standard pay-as-you-go images as far as I know | Satellite content view | `pacemaker_cluster_enable_repos` |
 | Firewall | NSG only (firewalld off) | `high-availability` service | `pacemaker_cluster_firewall_services` |
+
+## Preflight (runs first, changes nothing)
+
+`ha_preflight` checks every node and reports **all** problems at once, then stops before any cluster
+change: platform (RHEL 8/9), node list (2+, unique names and addresses), that each node name resolves
+from every node to the right address (never loopback), TCP reachability between the nodes, time
+synchronisation, that the cluster packages are installed or available from the enabled repositories
+(the High Availability repo), and that any shared devices exist. Turn it off with `run_preflight: false`.
+The cluster ports (2224/tcp, 5404-5405/udp) only open once the software runs, so the cluster build proves them.
 
 ## Resource model
 
@@ -61,5 +71,5 @@ sudo pcs node unstandby <node>          # stickiness keeps it where it is
 
 ## Checked and not checked
 
-- **Checked:** ansible-lint production profile, syntax-check of both example profiles, the role's control flow against a stand-in for `pcs`/`crm_resource`/`cibadmin` (apply, second run `changed=0`, drift repair, constraint score replacement, check mode, 7 rejected inputs with no write issued), handover export without framework leaks.
+- **Checked:** ansible-lint production profile, syntax-check of both example profiles, the preflight against stand-in facts and tools (each failure mode reported, nothing changed), the role's control flow against a stand-in for `pcs`/`crm_resource`/`cibadmin` (apply, second run `changed=0`, drift repair, constraint score replacement, check mode, 7 rejected inputs with no write issued), handover export without framework leaks.
 - **Not checked:** any real Pacemaker. The exact `pcs` syntax for RHEL 8.10 / 9, resource start, failover, fencing and the systemd-unit path have not been run against a real cluster.

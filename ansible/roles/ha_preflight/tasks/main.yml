@@ -1,0 +1,14 @@
+---
+# Flow: work out the node list -> run every check, collecting problems -> report -> stop if any.
+# Nothing here changes a host. Use it right after the standard RHEL build and before the cluster build.
+- name: Work out the node list
+  ansible.builtin.import_tasks: nodes.yml
+  tags: [ha_preflight, ha_preflight_nodes]
+
+- name: Run the checks
+  ansible.builtin.import_tasks: checks.yml
+  tags: [ha_preflight, ha_preflight_checks]
+
+- name: Report and stop on problems
+  ansible.builtin.import_tasks: report.yml
+  tags: [ha_preflight, ha_preflight_report]
