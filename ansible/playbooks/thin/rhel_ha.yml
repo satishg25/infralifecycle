@@ -75,23 +75,31 @@
     - name: Preflight - read-only checks, stops here if anything is wrong
       ansible.builtin.include_role:
         name: ha_preflight
+        apply:
+          tags: [preflight]
       when: run_preflight | default(true) | bool
       tags: [preflight]
 
     - name: Form the cluster
       ansible.builtin.include_role:
         name: pacemaker_cluster
+        apply:
+          tags: [pacemaker_cluster]
       tags: [pacemaker_cluster]
 
     - name: Create the resources, defaults and preferences
       ansible.builtin.include_role:
         name: rhel_ha
+        apply:
+          tags: [rhel_ha]
       tags: [rhel_ha]
 
     - name: Read-only cluster validation
       ansible.builtin.include_role:
         name: pacemaker_cluster
         tasks_from: validate
+        apply:
+          tags: [validate]
       when:
         - run_validation | default(true) | bool
         - not ansible_check_mode
@@ -101,6 +109,8 @@
       ansible.builtin.include_role:
         name: rhel_ha
         tasks_from: validate
+        apply:
+          tags: [validate]
       when:
         - run_validation | default(true) | bool
         - not ansible_check_mode
