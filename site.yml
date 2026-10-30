@@ -1,0 +1,620 @@
+---
+# RHEL 8 HA (Vanilla) - orchestration (site.yml).
+#
+# Test phase by phase with tags:  --tags validate | name | allocate | provision | configure | ha_core | close
+# (init, gate and close plays are tagged `always`; use -e ha_skip_mail=true -e ha_skip_cloudstudio=true while
+# testing). Skipped phases only work if their results are supplied as extra_vars, which is the resume
+# mechanism: rhel_ha_nodes[].state and the <stage>_done flags printed in the failure mail.
+#
+# Convention (same as the standalone site.yml): a failure sets failmsg/failmail/sucmail, every later stage
+# skips on failmsg != nomsg, the close play sends the mail and finally fails the job.
+#
+# SERIAL plays (serial: 1): node naming (role 03), per-node allocation (06/07/07_second), VIP reservation
+# (07) and Cohesity registration (26). Those roles pick "the next free thing" or read-modify-write a shared
+# object; two nodes in parallel would collide (same name, same IP, lost update).
+
+- name: "0 | Validate inputs and register virtual build hosts"
+  tags: [validate, always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Initialise control flags
+      ansible.builtin.set_fact:
+        nomsg: "{{ nomsg | default('nomsg') }}"
+        failmsg: "{{ failmsg | default('nomsg') }}"
+        failmail: "{{ failmail | default(false) }}"
+        sucmail: "{{ sucmail | default(true) }}"
+
+    - name: Debug parameters before workflow (standalone role 100)
+      ansible.builtin.include_role:
+        name: "{{ ha_standalone_ns }}100_debug_params"
+      when: not (ha_skip_debug | default(false) | bool)
+
+    - name: Validate the inputs (controller scope)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Input validation"
+        ha_stage_role: 31_rhel_ha_preflight
+        ha_preflight_scope: controller
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_instruction: "Please correct the inputs below and re-run."
+
+    - name: Send request received email (new requests only, as in the standalone flow)
+      ansible.builtin.include_role:
+        name: "{{ ha_standalone_ns }}98_email_req_received"
+      when:
+        - clustername | default(None) is none
+        - failmsg == nomsg
+        - not (ha_skip_mail | default(false) | bool)
+
+    - name: Register one virtual build host per node (and the VIP host when role 07 reserves it)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_inventory"
+        tasks_from: virtual
+      when: failmsg == nomsg
+
+- name: "0 | Initialise per-node state on the build hosts"
+  tags: [always]
+  hosts: ha_all_builders
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Initialise node-scope and cluster-scope variables
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_inventory"
+        tasks_from: init_node
+
+- name: "1 | Name the nodes (serial: role 03 must see the names already taken)"
+  tags: [name, allocate]
+  hosts: ha_builders
+  serial: 1
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Server name selection
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Server name selection"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: node_name
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: node_name_done
+        ha_stage_when: "{{ ha_proceed_builders }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: name
+      when: failmsg == nomsg
+
+- name: "1 | Gate after naming"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_builders
+        ha_gate_phase: name
+
+    - name: Resolve the node names
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_inventory"
+        tasks_from: resolve
+      when: failmsg == nomsg
+
+- name: "1 | Allocate cluster-level resources"
+  tags: [allocate]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Cluster allocation
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Cluster allocation (DC, tier, network, golden image, folder)"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: cluster_allocate
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: cluster_allocate_done
+
+    - name: Copy cluster-scope values to the build hosts
+      ansible.builtin.set_fact:
+        "{{ item.1 }}": "{{ vars.get(item.1) }}"
+      delegate_to: "{{ item.0 }}"
+      delegate_facts: true
+      loop: "{{ groups['ha_all_builders'] | product(ha_cluster_scope_vars) | list }}"
+      loop_control:
+        label: "{{ item.0 }}: {{ item.1 }}"
+      when: failmsg == nomsg
+
+- name: "1 | Allocate per node (datastore, host check, IP/DNS), serial"
+  tags: [allocate]
+  hosts: ha_builders
+  serial: 1
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Node allocation
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Node allocation"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: node_allocate
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: node_allocate_done
+        ha_stage_when: "{{ ha_proceed_builders }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: allocate
+      when: failmsg == nomsg
+
+- name: "1 | Reserve the VIP through role 07 (mode bluecat_07 only), serial"
+  tags: [allocate]
+  hosts: ha_vip_builders
+  serial: 1
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: VIP address
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "VIP address reservation"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: vip_allocate
+        ha_stage_team: "{{ ha_teams.network }}"
+        ha_stage_done_var: vip_allocate_done
+        ha_stage_when: "{{ ha_proceed_builders }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: allocate
+      when: failmsg == nomsg
+
+- name: "1 | Gate after allocation, confirm the VIP"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_all_builders
+        ha_gate_phase: allocate
+
+    - name: Resolve the node list (IPs are known now)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_inventory"
+        tasks_from: resolve
+      when: failmsg == nomsg
+
+    - name: Confirm the VIP and its DNS record
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "VIP confirmation"
+        ha_stage_role: "{{ ha_role_pfx | default('18512_') }}ha_vip_reserve"
+        ha_stage_team: "{{ ha_teams.network }}"
+        ha_stage_done_var: ha_vip_reserved_done
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+- name: "2 | Provision VMs (powered off)"
+  tags: [provision]
+  hosts: ha_builders
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Create the VM, tag/IP it, add disks
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "VM provisioning"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: node_provision
+        ha_stage_team: "{{ ha_teams.vmware }}"
+        ha_stage_done_var: node_provision_done
+        ha_stage_when: "{{ ha_proceed_builders }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: provision
+      when: failmsg == nomsg
+
+- name: "2 | Gate after provisioning"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_builders
+        ha_gate_phase: provision
+
+- name: "2 | VMware HA adapter (anti-affinity rule, shared disk) before first power-on"
+  tags: [provision]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Anti-affinity rule and shared disk
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "VMware HA infrastructure"
+        ha_stage_role: 38_vmware_ha_infra
+        ha_stage_team: "{{ ha_teams.vmware }}"
+        ha_stage_done_var: vmware_ha_infra_done
+
+- name: "3 | Power on and configure each node (standalone roles, per node)"
+  tags: [configure]
+  hosts: ha_builders
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Node configuration
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Node configuration"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: node_configure
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: node_configure_done
+        ha_stage_when: "{{ ha_proceed_builders }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: configure
+      when: failmsg == nomsg
+
+- name: "3 | Gate after configuration"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_builders
+        ha_gate_phase: configure
+
+- name: "3 | Cohesity registration (serial: read-modify-write of one protection job)"
+  tags: [configure]
+  hosts: ha_builders
+  serial: 1
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Cohesity registration
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Backup registration"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: node_backup
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: node_backup_done
+        ha_stage_when: "{{ ha_proceed_builders and (ha_run_backup | default(true) | bool) }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: backup
+      when: failmsg == nomsg
+
+- name: "3 | Monitoring onboarding"
+  tags: [configure]
+  hosts: ha_builders
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: OpsRamp onboarding
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Monitoring onboarding"
+        ha_stage_role: 39_rhel_node_build
+        ha_stage_tasks_from: node_onboard
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: node_onboard_done
+        ha_stage_when: "{{ ha_proceed_builders }}"
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: onboard
+      when: failmsg == nomsg
+
+- name: "3 | Gate after onboarding, register the real nodes"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_builders
+        ha_gate_phase: onboard
+
+    - name: Add the real nodes to the inventory (SSH)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_inventory"
+        tasks_from: real
+      when: failmsg == nomsg
+
+# ---------------------------------------------------------------- 4. HA core
+- name: "4 | Node preflight, shared storage, cluster, fencing, quorum"
+  tags: [ha_core]
+  hosts: ha_real_nodes
+  gather_facts: true
+  become: true
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Initialise control flags and wait for SSH
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_inventory"
+        tasks_from: init_real
+
+    - name: Node preflight
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Node preflight"
+        ha_stage_role: 31_rhel_ha_preflight
+        ha_preflight_scope: node
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Shared storage (OS side)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Shared storage"
+        ha_stage_role: 35_rhel_ha_storage
+        ha_stage_team: "{{ ha_teams.storage }}"
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Mark node ready for clustering
+      ansible.builtin.set_fact:
+        ha_phase_ok: node_ready
+      when: failmsg == nomsg
+
+- name: "4 | Gate before cluster creation"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_real_nodes
+        ha_gate_phase: node_ready
+
+- name: "4 | Create the cluster, fencing, quorum, resources"
+  tags: [ha_core]
+  hosts: ha_real_nodes
+  gather_facts: false
+  become: true
+  vars_files:
+    - vars/ha_common.yml
+  tasks:
+    - name: Pacemaker/Corosync cluster
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Cluster creation"
+        ha_stage_role: 32_rhel_ha_cluster
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: ha_cluster_done
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Fencing
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Fencing"
+        ha_stage_role: 36_rhel_ha_fencing
+        ha_stage_team: "{{ ha_teams.vmware }}"
+        ha_stage_done_var: ha_fencing_done
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Two-node quorum check
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Quorum"
+        ha_stage_role: 37_rhel_ha_quorum
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Resources (storage, filesystem, VIP, applications)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Cluster resources"
+        ha_stage_role: 33_rhel_ha_resources
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_done_var: ha_resources_done
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Validate the build
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Build validation"
+        ha_stage_role: 34_rhel_ha_validation
+        ha_validation_mode: build
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_when: "{{ ha_proceed_real }}"
+
+    - name: Fencing tests (disruptive, opt-in)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Fencing test"
+        ha_stage_role: 36_rhel_ha_fencing
+        ha_stage_tasks_from: tests
+        ha_stage_team: "{{ ha_teams.vmware }}"
+        ha_stage_when: "{{ (ha_run_disruptive_tests | default(false) | bool) and hostvars['localhost'].failmsg == hostvars['localhost'].nomsg }}"
+
+    - name: Failover test (disruptive, opt-in)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "Failover test"
+        ha_stage_role: 34_rhel_ha_validation
+        ha_validation_mode: failover
+        ha_stage_team: "{{ ha_teams.default }}"
+        ha_stage_when: "{{ (ha_run_disruptive_tests | default(false) | bool) and hostvars['localhost'].failmsg == hostvars['localhost'].nomsg }}"
+
+    - name: Mark phase reached
+      ansible.builtin.set_fact:
+        ha_phase_ok: ha_core
+      when: failmsg == nomsg
+
+- name: "4 | Gate after HA core"
+  tags: [always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Aggregate node results
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: gate
+      vars:
+        ha_gate_group: ha_real_nodes
+        ha_gate_phase: ha_core
+
+# ---------------------------------------------------------------- 5. close
+- name: "5 | Close: CloudStudio, mail, final status"
+  tags: [close, always]
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/ha_common.yml
+    - defaults/main.yml
+  tasks:
+    - name: Facts for CloudStudio and the success mail
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+        tasks_from: close_facts
+      when:
+        - failmsg == nomsg
+        - ha_nodes is defined
+
+    - name: Update CloudStudio (repackaged role 95, same guards as the standalone flow)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_stage"
+      vars:
+        ha_stage_name: "CloudStudio update"
+        ha_stage_role: "{{ ha_role_pfx | default('18512_') }}ha_cloudstudio_update"
+        ha_stage_team: "{{ ha_teams.cloudstudio }}"
+        ha_stage_when: "{{ not (ha_skip_cloudstudio | default(false) | bool) and cloudstudio_onboarding | default(none) is none and requestid | default(none) is not none and failmsg == nomsg }}"
+
+    - name: Debug parameters after successful workflow
+      ansible.builtin.include_role:
+        name: "{{ ha_standalone_ns }}100_debug_params"
+      when:
+        - failmsg == nomsg
+        - not (ha_skip_debug | default(false) | bool)
+
+    - name: Success mail (repackaged role 97)
+      ansible.builtin.include_role:
+        name: "{{ ha_role_ns }}{{ ha_role_pfx | default('18512_') }}ha_email_success"
+      when:
+        - failmsg == nomsg
+        - sucmail | bool
+        - not (ha_skip_mail | default(false) | bool)
+
+    - name: Failure mail
+      ansible.builtin.include_role:
+        name: "{{ ha_standalone_ns }}99_send_failure_email"
+      when:
+        - failmsg != nomsg
+        - failmail | bool
+        - not (ha_skip_mail | default(false) | bool)
+
+    - name: BAU failure mail
+      ansible.builtin.include_role:
+        name: "{{ ha_standalone_ns }}96_bau_send_failure_email"
+      when:
+        - failmsg != nomsg
+        - failmail | bool
+        - not (ha_skip_mail | default(false) | bool)
+
+    - name: Debug parameters after workflow
+      ansible.builtin.include_role:
+        name: "{{ ha_standalone_ns }}100_debug_params"
+      when: not (ha_skip_debug | default(false) | bool)
+
+    - name: Fail the job so AAP shows red
+      ansible.builtin.fail:
+        msg: "RHEL HA build stopped. See the failure mail / job output."
+      when: failmsg != nomsg
