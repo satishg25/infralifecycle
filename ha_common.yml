@@ -1,0 +1,80 @@
+---
+# Loaded by every play in main.yml. Edit here, not in the plays.
+
+# Namespace of the existing standalone roles, and of the new HA roles.
+# Locally the new roles live in ./roles (no namespace); once added to the shared
+# collection set ha_role_ns to "aap.shared.".
+ha_standalone_ns: "aap.shared."
+ha_role_ns: ""
+
+# Team addressed in the HTML failure mail, per kind of stage.
+ha_teams:
+  default: "Linux Platform Team"
+  vmware: "VMWare Team"
+  storage: "Storage Team"
+  network: "Network Team"
+  cloudstudio: "CloudStudio Team"
+
+# Connection to the real nodes (phase 6). In AAP attach a Machine credential;
+# do not put passwords here. accept-new avoids "off" while still allowing fresh VMs.
+ha_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+# ha_ssh_user: root       # uncomment to force ansible_user (overrides the credential user)
+
+# Node-scope = per-node facts (own the standalone roles' global-fact guards on the build host);
+# cluster-scope = produced once on localhost and copied into every build host.
+# Assignment follows the code review of roles 03-09/26: role 05 outputs (backup server) are per
+# cluster, flavour (vm_cpu, vm_ram_mb) and the addressing results written by role 07 are per node.
+ha_node_scope_vars:
+  - servername
+  - datastorename
+  - hostname
+  - ip
+  - ip2
+  - vm_cpu
+  - vm_ram_mb
+  - dns1
+  - dns2
+  - gateway
+  - subnetmask
+  - is_vm_created
+  - network_configured
+  - disk_configuration_completed
+  - vmtools_update_complete
+  - root_password_reset
+  - ip_configured
+  - idm_registration_completed
+  - satellite_onboard
+  - vm_joined_domain
+  - is_valuemation_ci_created
+  - prometheus_install
+  - defender_install
+  - defender_onboarding
+  - flexera_install
+  - opsramp_install
+  - cyberark_onboard
+  - cohesity_onboard
+  - opsramp_onboarding
+ha_cluster_scope_vars:
+  - clustername
+  - dcname
+  - securityzonename
+  - primaryvlanname
+  - primaryvlanid
+  - backupvlanname
+  - backupvlanid
+  - blucatbackupvlanid
+  - backupserverip
+  - backupservername
+  - isactive
+  - goldenimagename
+  - target_folder
+  - is_folder_created
+
+# Progress conditions for stages on the build hosts / real nodes: nothing has failed on localhost and no
+# sibling node has failed (matters in serial plays, where node 2 must not start after node 1 failed).
+ha_proceed_builders: >-
+  {{ hostvars['localhost'].failmsg == hostvars['localhost'].nomsg
+     and (groups['ha_all_builders'] | default([]) | map('extract', hostvars, 'failmsg')
+          | select('ne', hostvars['localhost'].nomsg) | list | length == 0) }}
+ha_proceed_real: >-
+  {{ hostvars['localhost'].failmsg == hostvars['localhost'].nomsg }}
